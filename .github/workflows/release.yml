@@ -49,10 +49,9 @@ jobs:
           echo "APK=$apk"
           signature_output=$("$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --min-sdk-version 28 "$apk" 2>&1 || true)
           printf '%s\n' "$signature_output"
-          case "$signature_output" in
-            *'Verified using v2 scheme (APK Signature Scheme v2): true'*) echo 'APK Signature Scheme v2 verified.' ;;
-            *) echo 'ERROR: v2 APK signature verification failed.'; exit 1 ;;
-          esac
+          echo "$signature_output" | grep -Fq 'Verified using v1 scheme (JAR signing): true'
+          echo "$signature_output" | grep -Fq 'Verified using v2 scheme (APK Signature Scheme v2): true'
+          echo 'APK Signature Schemes v1 + v2 verified.'
           unzip -t "$apk" >/dev/null
           unzip -Z1 "$apk" > /tmp/files
           grep -Fqx 'assets/playground/index.html' /tmp/files
@@ -63,7 +62,7 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/aapt2" dump badging "$apk" | tee /tmp/badging.txt
           grep -Fq "package: name='com.aadityasamriya.needle2.localagent'" /tmp/badging.txt
           grep -Fq "sdkVersion:'28'" /tmp/badging.txt
-          echo 'APK structure, package id, minSdk and signature verified.'
+          echo 'APK structure, package id, minSdk and signatures verified.'
 
           export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
           export ANDROID_AVD_HOME="$HOME/.android/avd"
@@ -111,13 +110,13 @@ jobs:
           echo 'REAL ANDROID 9 EMULATOR INSTALL + LAUNCH PASSED.'
 
           mkdir -p release package
-          cp "$apk" release/Needle2-Android-v2.1.0-arm64-signed.apk
-          sha256sum release/Needle2-Android-v2.1.0-arm64-signed.apk | tee release/Needle2-Android-v2.1.0-arm64-signed.apk.sha256
-          cp release/Needle2-Android-v2.1.0-arm64-signed.apk package/base.apk
-          cp release/Needle2-Android-v2.1.0-arm64-signed.apk.sha256 package/base.apk.sha256
+          cp "$apk" release/Needle2-Android-v2.1.0-universal-signed.apk
+          sha256sum release/Needle2-Android-v2.1.0-universal-signed.apk | tee release/Needle2-Android-v2.1.0-universal-signed.apk.sha256
+          cp release/Needle2-Android-v2.1.0-universal-signed.apk package/base.apk
+          cp release/Needle2-Android-v2.1.0-universal-signed.apk.sha256 package/base.apk.sha256
           printf '%s\n' 'Needle 2 Android v2.1.0' '' 'Android 9+.' 'Install the APK, open Needle 2 Local AI, enable Device Automation, then open the Local Agent in Chrome.' '' 'Needle 2 inference runs in browser WebAssembly. The APK contains the localhost bridge, accessibility service, UI, browser engine and model. No Termux, Python, cloud API, or Android native Needle runtime is required.' > package/README.txt
-          (cd package && zip -q ../release/Needle2-Android-v2.1.0-arm64-package.zip base.apk base.apk.sha256 README.txt)
-          sha256sum release/Needle2-Android-v2.1.0-arm64-package.zip | tee release/Needle2-Android-v2.1.0-arm64-package.zip.sha256
+          (cd package && zip -q ../release/Needle2-Android-v2.1.0-universal-package.zip base.apk base.apk.sha256 README.txt)
+          sha256sum release/Needle2-Android-v2.1.0-universal-package.zip | tee release/Needle2-Android-v2.1.0-universal-package.zip.sha256
       - uses: actions/upload-artifact@v4
         with:
           name: Needle2-Android-v2.1.0-browser-local
