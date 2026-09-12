@@ -47,16 +47,12 @@ jobs:
           esac
           unzip -t "$apk" >/dev/null
           unzip -Z1 "$apk" > /tmp/files
-          required_entries=(
-            'assets/needle2.cact'
-            'assets/playground/index.html'
-            'lib/arm64-v8a/libneedle2_jni.so'
-            'res/xml/accessibility_service_config.xml'
-          )
-          for entry in "${required_entries[@]}"; do
-            grep -Fqx "$entry" /tmp/files || { echo "MISSING: $entry"; exit 1; }
-            echo "OK: $entry"
-          done
+          grep -Fqx 'assets/needle2.cact' /tmp/files
+          grep -Fqx 'assets/playground/index.html' /tmp/files
+          grep -Fqx 'lib/arm64-v8a/libneedle2_jni.so' /tmp/files
+          echo 'Required model, playground and ARM64 native library are present.'
+          "$ANDROID_HOME/build-tools/35.0.0/aapt2" dump xmltree "$apk" AndroidManifest.xml | grep -F 'AutomationAccessibilityService'
+          echo 'Accessibility service declaration verified in AndroidManifest.'
           mkdir -p release package
           cp "$apk" release/Needle2-Android-v1.3.2-arm64-signed.apk
           sha256sum release/Needle2-Android-v1.3.2-arm64-signed.apk | tee release/Needle2-Android-v1.3.2-arm64-signed.apk.sha256
