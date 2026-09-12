@@ -1,35 +1,41 @@
-# Needle2-Android
+# Needle 2 Local AI Device Agent
 
-A small Android 9+ application that runs Cactus Compute Needle 2 locally on ARM64 devices.
+An Android 9+ ARM64 local AI device-agent built around Cactus Compute Needle 2. Designed first for the OPPO A11k (CPH2083).
 
-## Target device
+## What it does
 
-Designed first for the OPPO A11k (CPH2083): Android 9, `arm64-v8a`.
+- Runs the Needle 2 model locally on-device.
+- Uses Android AccessibilityService for user-enabled UI automation.
+- Can read visible screen text, tap visible labels, type text, tap coordinates, swipe, press Back/Home, launch installed apps and open URLs.
+- Provides local battery/time tools.
+- Hosts an offline playground at `http://127.0.0.1:8765/` that can be opened in Chrome.
+- No Termux, Python, cloud API or remote inference required.
+
+## First-time setup
+
+1. Install the signed ARM64 APK.
+2. Open the app.
+3. Tap **Enable Device Automation**.
+4. In Android Accessibility settings, enable **Needle 2 Device Automation**.
+5. Return to the app.
+6. Tap **Open Playground in Chrome**.
+7. Give the agent natural-language commands.
+
+AccessibilityService is explicitly user-enabled. Android controls the service lifecycle and permission; the app cannot silently enable it.
 
 ## Architecture
 
-- Official Cactus Needle 2 Android ARM64 static engine (`libneedle.a`)
-- Official `needle2.cact` weights (~14 MB)
-- Small JNI bridge
-- Plain Android Java UI; no Termux, Python, server, or API key
-- Model and inference run locally after installation
+The UI/server process and native Needle engine run separately. The engine process calls the main-process automation bridge only through loopback. This isolates a native engine failure from the main UI as much as practical.
 
-Needle 2 is specifically a tool-calling / structured-extraction model rather than a general chat model. It returns structured tool calls and can return a final response after tool results are fed back. See the official Cactus documentation for the model contract.
+The official Needle 2 model supports structured function calls and is intended for tool calling/device use rather than unrestricted general chat. The app follows the documented `function_calls[].arguments` contract.
+
+## Safety
+
+The agent is limited to declared tools. The system prompt instructs it to ask for confirmation before risky or irreversible actions such as purchases, message sending, deletion or account changes. Android privileged operations still require the relevant OS permission and may not be automatable.
 
 ## Build
 
-GitHub Actions downloads the official Cactus ARM64 engine and model at build time, verifies the model SHA-256, and produces a debug APK artifact. The large binary files are intentionally **not committed to this repository**.
-
-Run the `Build Needle 2 Android` workflow from GitHub Actions, or push to `main` to trigger it.
-
-## Current local tools
-
-The demo app declares two safe device tools:
-
-- `get_battery`
-- `get_time`
-
-The app executes those tools locally and feeds their JSON results back into Needle 2.
+GitHub Actions downloads the official Cactus ARM64 engine and model at build time, verifies the model SHA-256, builds a signed APK, and verifies the APK contents, native libraries and accessibility-service resource before publishing the release package.
 
 ## License
 
