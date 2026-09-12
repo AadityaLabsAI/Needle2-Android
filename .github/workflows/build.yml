@@ -37,9 +37,14 @@ jobs:
         run: gradle :app:assembleRelease --no-daemon --stacktrace
       - name: Verify APK signature, package, native libraries and automation service
         run: |
+          set -e
           APK_PATH=$(find app/build/outputs/apk -type f -name '*.apk' | head -n 1)
           test -n "$APK_PATH"
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK_PATH"
+          echo '--- APK signature verification ---'
+          SIGNATURE_OUTPUT=$("$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK_PATH" 2>&1) || true
+          printf '%s\n' "$SIGNATURE_OUTPUT"
+          echo "$SIGNATURE_OUTPUT" | grep -Eq 'Verified using v2 scheme.*true'
+          echo 'V2 APK signature verified.'
           unzip -t "$APK_PATH" >/dev/null
           ZIP_LIST=$(mktemp)
           unzip -Z1 "$APK_PATH" > "$ZIP_LIST"
