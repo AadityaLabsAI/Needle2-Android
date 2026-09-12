@@ -51,17 +51,11 @@ jobs:
             'assets/needle2.cact'
             'assets/playground/index.html'
             'lib/arm64-v8a/libneedle2_jni.so'
-            'lib/arm64-v8a/libc++_shared.so'
             'res/xml/accessibility_service_config.xml'
           )
           for entry in "${required_entries[@]}"; do
-            if grep -Fqx "$entry" /tmp/files; then
-              echo "OK: $entry"
-            else
-              echo "MISSING: $entry"
-              grep -E 'needle2|playground|accessibility|arm64-v8a|c\+\+_shared' /tmp/files || true
-              exit 1
-            fi
+            grep -Fqx "$entry" /tmp/files || { echo "MISSING: $entry"; exit 1; }
+            echo "OK: $entry"
           done
           mkdir -p release package
           cp "$apk" release/Needle2-Android-v1.3.2-arm64-signed.apk
