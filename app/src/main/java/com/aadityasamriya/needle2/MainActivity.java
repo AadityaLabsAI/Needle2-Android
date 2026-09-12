@@ -1,171 +1,116 @@
 package com.aadityasamriya.needle2;
 
 import android.app.Activity;
+import android.content.ComponentName;
+import android.content.Intent;
+import android.content.ServiceConnection;
+import android.net.Uri;
 import android.os.Bundle;
-import android.os.BatteryManager;
-import android.os.Handler;
-import android.os.Looper;
+import android.os.IBinder;
 import android.view.Gravity;
 import android.graphics.Typeface;
 import android.widget.Button;
-import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
-import org.json.JSONArray;
-import org.json.JSONObject;
-import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
-import java.text.DateFormat;
-import java.util.Date;
-import java.util.Locale;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 public class MainActivity extends Activity {
-    private final ExecutorService executor = Executors.newSingleThreadExecutor();
-    private final Handler main = new Handler(Looper.getMainLooper());
+    private EngineService.LocalBinder engine;
+    private LocalPlaygroundServer server;
     private TextView status;
-    private TextView output;
-    private EditText input;
-    private Button send;
-    private boolean ready = false;
+    private boolean bound;
+    private static final int PORT = 8765;
 
-    private static final String TOOLS = "[" +
-            "{\"name\":\"get_battery\",\"description\":\"Get the phone battery percentage and charging state.\",\"parameters\":{\"type\":\"object\",\"properties\":{},\"required\":[]}}," +
-            "{\"name\":\"get_time\",\"description\":\"Get the current local date and time on the phone.\",\"parameters\":{\"type\":\"object\",\"properties\":{},\"required\":[]}}" +
-            "]";
-
-    private static final String SYSTEM =
-            "device: Android phone; locale: en-IN; assistant: Needle 2 Local. " +
-            "Use only the declared tools. If a request cannot be served by a declared tool, return an empty call.";
+    private final ServiceConnection connection = new ServiceConnection() {
+        @Override public void onServiceConnected(ComponentName name, IBinder service) {
+            engine = (EngineService.LocalBinder) service;
+            bound = true;
+            LocalPlaygroundServer.AssetStore.init(MainActivity.this);
+            try {
+                if (server == null) server = new LocalPlaygroundServer(engine, PORT);
+                server.start();
+                status.setText("Local playground running • no Internet required");
+            } catch (Exception e) {
+                status.setText("Could not start local server: " + e.getMessage());
+            }
+        }
+        @Override public void onServiceDisconnected(ComponentName name) {
+            bound = false; engine = null;
+            status.setText("Engine process stopped. The app UI is still safe.");
+        }
+    };
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         buildUi();
-        executor.execute(this::loadModel);
+        // Do not load native Needle during UI startup. The engine is isolated in its own process.
+        Intent service = new Intent(this, EngineService.class);
+        startService(service);
+        bindService(service, connection, BIND_AUTO_CREATE);
     }
 
     private void buildUi() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(24, 24, 24, 16);
+        root.setPadding(24, 24, 24, 18);
 
         TextView title = new TextView(this);
-        title.setText("Needle 2 Local");
-        title.setTextSize(24);
+        title.setText("Needle 2 Local"); title.setTextSize(25);
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         root.addView(title, new LinearLayout.LayoutParams(-1, -2));
 
         status = new TextView(this);
-        status.setText("Loading local engine…");
-        status.setPadding(0, 8, 0, 16);
+        status.setText("Starting local playground…"); status.setTextSize(16);
+        status.setPadding(0, 10, 0, 14);
         root.addView(status, new LinearLayout.LayoutParams(-1, -2));
 
         ScrollView scroll = new ScrollView(this);
-        output = new TextView(this);
-        output.setTextSize(16);
-        output.setText("Needle 2 runs completely on this phone.\n");
-        output.setPadding(0, 8, 0, 16);
-        scroll.addView(output);
+        TextView instructions = new TextView(this);
+        instructions.setTextSize(16);
+        instructions.setText(
+                "यह app Internet के बिना local Needle 2 playground चलाता है।\n\n" +
+                "कैसे इस्तेमाल करें:\n" +
+                "1. नीचे ‘Open Playground in Chrome’ दबाएँ।\n" +
+                "2. Chrome में local playground खुलेगा।\n" +
+                "3. Internet बंद होने पर भी page और bundled files उपलब्ध रहेंगे।\n" +
+                "4. पहली query पर local Needle 2 engine initialize होगा।\n" +
+                "5. फिर message लिखकर Run locally दबाएँ।\n\n" +
+                "Dependencies / model app के अंदर bundled हैं। Chrome में कुछ अलग से install करने की जरूरत नहीं है; Chrome केवल local web UI render करता है।\n\n" +
+                "अगर Chrome बंद कर दिया जाए, तो app को background में चालू रखें ताकि local server चलता रहे।");
+        instructions.setPadding(0, 8, 0, 20);
+        scroll.addView(instructions);
         root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
 
-        LinearLayout row = new LinearLayout(this);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        input = new EditText(this);
-        input.setHint("Try: What is my battery level?");
-        input.setSingleLine(true);
-        row.addView(input, new LinearLayout.LayoutParams(0, -2, 1));
-        send = new Button(this);
-        send.setText("Send");
-        send.setEnabled(false);
-        send.setOnClickListener(v -> sendQuery());
-        row.addView(send, new LinearLayout.LayoutParams(-2, -2));
-        root.addView(row, new LinearLayout.LayoutParams(-1, -2));
+        Button open = new Button(this);
+        open.setText("Open Playground in Chrome");
+        open.setOnClickListener(v -> openChrome());
+        root.addView(open, new LinearLayout.LayoutParams(-1, -2));
+
+        Button statusButton = new Button(this);
+        statusButton.setText("Check Engine Status");
+        statusButton.setOnClickListener(v -> {
+            if (engine == null) status.setText("Engine service not connected");
+            else status.setText("Local server: http://127.0.0.1:" + PORT + "/\n" + engine.statusJson());
+        });
+        root.addView(statusButton, new LinearLayout.LayoutParams(-1, -2));
+
+        LinearLayout.LayoutParams p = (LinearLayout.LayoutParams) open.getLayoutParams();
+        p.gravity = Gravity.CENTER_HORIZONTAL;
+        open.setLayoutParams(p);
         setContentView(root);
     }
 
-    private void loadModel() {
-        try (InputStream in = getAssets().open("needle2.cact")) {
-            byte[] model = readAll(in);
-            int rc = NativeNeedle.load(model);
-            if (rc != 0) throw new IllegalStateException("needle_load failed: " + rc);
-            int init = NativeNeedle.init(SYSTEM, TOOLS);
-            if (init < 0) throw new IllegalStateException("needle_init failed: " + init);
-            ready = true;
-            main.post(() -> { status.setText("Ready • fully local • Android ARM64"); send.setEnabled(true); });
-        } catch (Exception e) {
-            main.post(() -> status.setText("Engine error: " + e.getMessage()));
-        }
-    }
-
-    private void sendQuery() {
-        if (!ready) return;
-        final String query = input.getText().toString().trim();
-        if (query.isEmpty()) return;
-        input.setText("");
-        send.setEnabled(false);
-        output.append("\nYou: " + query + "\n");
-        executor.execute(() -> {
-            try {
-                String finalText = runAgentTurn(query);
-                main.post(() -> { output.append("Needle: " + finalText + "\n"); send.setEnabled(true); });
-            } catch (Exception e) {
-                main.post(() -> { output.append("Error: " + e.getMessage() + "\n"); send.setEnabled(true); });
-            }
-        });
-    }
-
-    private String runAgentTurn(String query) throws Exception {
-        String response = NativeNeedle.complete(query, 256);
-        for (int round = 0; round < 4; round++) {
-            JSONObject obj = new JSONObject(response);
-            JSONArray calls = obj.optJSONArray("function_calls");
-            if (calls == null || calls.length() == 0) {
-                String reasoning = obj.optString("reasoning", "");
-                return reasoning.isEmpty() ? response : reasoning;
-            }
-            // Needle's documented multi-turn contract feeds each tool result back as the next complete().
-            for (int i = 0; i < calls.length(); i++) {
-                JSONObject call = calls.getJSONObject(i);
-                String name = call.optString("name");
-                JSONObject result = executeTool(name);
-                response = NativeNeedle.complete(result.toString(), 256);
-                JSONObject next = new JSONObject(response);
-                JSONArray nextCalls = next.optJSONArray("function_calls");
-                if (nextCalls == null || nextCalls.length() == 0) {
-                    String reasoning = next.optString("reasoning", "");
-                    return reasoning.isEmpty() ? response : reasoning;
-                }
-            }
-        }
-        return response;
-    }
-
-    private JSONObject executeTool(String name) throws Exception {
-        JSONObject result = new JSONObject();
-        if ("get_battery".equals(name)) {
-            BatteryManager bm = (BatteryManager) getSystemService(BATTERY_SERVICE);
-            result.put("battery_percent", bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY));
-            result.put("charging", bm.isCharging());
-        } else if ("get_time".equals(name)) {
-            result.put("local_time", DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.MEDIUM, Locale.getDefault()).format(new Date()));
-        } else {
-            result.put("error", "Unknown tool: " + name);
-        }
-        return result;
-    }
-
-    private static byte[] readAll(InputStream in) throws Exception {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        byte[] buffer = new byte[8192];
-        int n;
-        while ((n = in.read(buffer)) != -1) out.write(buffer, 0, n);
-        return out.toByteArray();
+    private void openChrome() {
+        Uri uri = Uri.parse("http://127.0.0.1:" + PORT + "/");
+        Intent intent = new Intent(Intent.ACTION_VIEW, uri);
+        intent.setPackage("com.android.chrome");
+        try { startActivity(intent); }
+        catch (Exception chromeMissing) { startActivity(new Intent(Intent.ACTION_VIEW, uri)); }
     }
 
     @Override protected void onDestroy() {
-        executor.shutdownNow();
+        if (server != null) server.stop();
+        if (bound) unbindService(connection);
         super.onDestroy();
     }
 }
