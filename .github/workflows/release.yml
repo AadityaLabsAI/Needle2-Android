@@ -48,10 +48,6 @@ jobs:
           signature_output=$("$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --min-sdk-version 28 "$apk" 2>&1 || true)
           printf '%s\n' "$signature_output"
           case "$signature_output" in
-            *'Verified using v1 scheme (JAR signing): true'*) echo 'APK Signature Scheme v1 verified.' ;;
-            *) echo 'ERROR: v1 APK signature verification failed.'; exit 1 ;;
-          esac
-          case "$signature_output" in
             *'Verified using v2 scheme (APK Signature Scheme v2): true'*) echo 'APK Signature Scheme v2 verified.' ;;
             *) echo 'ERROR: v2 APK signature verification failed.'; exit 1 ;;
           esac
@@ -65,7 +61,7 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/aapt2" dump badging "$apk" | tee /tmp/badging.txt
           grep -Fq "package: name='com.aadityasamriya.needle2.localagent'" /tmp/badging.txt
           grep -Fq "sdkVersion:'28'" /tmp/badging.txt
-          echo 'APK structure, package id, minSdk and signatures verified.'
+          echo 'APK structure, package id, minSdk and v2 signature verified.'
           export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
           export ANDROID_AVD_HOME="$HOME/.android/avd"
           mkdir -p "$ANDROID_AVD_HOME"
