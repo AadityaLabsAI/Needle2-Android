@@ -61,16 +61,28 @@ jobs:
           echo 'APK structure verified.'
           export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
           echo no | avdmanager create avd -n needle-api28 -k 'system-images;android-28;google_apis;x86_64' --force
-          emulator -avd needle-api28 -no-window -no-audio -no-boot-anim -no-snapshot -wipe-data > /tmp/emulator.log 2>&1 &
+          adb start-server
+          emulator -avd needle-api28 -no-window -no-audio -no-boot-anim -no-snapshot -wipe-data -gpu swiftshader_indirect > /tmp/emulator.log 2>&1 &
           emulator_pid=$!
-          trap 'adb emu kill >/dev/null 2>&1 || true; kill "$emulator_pid" >/dev/null 2>&1 || true' EXIT
-          adb wait-for-device
-          for i in $(seq 1 60); do
+          cleanup() { adb emu kill >/dev/null 2>&1 || true; kill "$emulator_pid" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          if ! timeout 60s adb wait-for-device; then
+            echo 'ERROR: Android 9 emulator did not become available.'
+            tail -n 120 /tmp/emulator.log || true
+            exit 1
+          fi
+          booted=''
+          for i in $(seq 1 90); do
             booted=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
             [ "$booted" = '1' ] && break
             sleep 2
           done
-          [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = '1' ]
+          if [ "$booted" != '1' ]; then
+            echo 'ERROR: Android 9 emulator did not finish booting.'
+            tail -n 120 /tmp/emulator.log || true
+            adb shell getprop 2>/dev/null | tail -n 40 || true
+            exit 1
+          fi
           adb install -r "$apk"
           adb shell pm path com.aadityasamriya.needle2.localagent
           adb shell monkey -p com.aadityasamriya.needle2.localagent 1 >/dev/null
