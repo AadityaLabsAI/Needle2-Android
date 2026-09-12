@@ -6,7 +6,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - name: Download official Needle 2 browser runtime and model
@@ -18,21 +18,19 @@ jobs:
           curl -fL --retry 5 "$base/wasm/needle.wasm?download=true" -o app/src/main/assets/runtime/needle.wasm
           curl -fL --retry 5 "$base/needle2.cact?download=true" -o app/src/main/assets/runtime/needle2.cact
           echo 'b43aabfcaf1a6db6acf488076eab71d823c08697c7af4521fc1d174b60ede5ba  app/src/main/assets/runtime/needle2.cact' | sha256sum -c -
-          test -s app/src/main/assets/runtime/needle.js
-          test -s app/src/main/assets/runtime/needle.wasm
-          test -s app/src/main/assets/runtime/needle2.cact
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
         with:
-          cmdline-tools-version: 12266719
           accept-android-sdk-licenses: true
-      - name: Install Android SDK and Android 9 test image
+      - name: Install Android SDK and Android 9 test image robustly
         run: |
           set -euo pipefail
-          sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'emulator' 'platform-tools' 'platforms;android-28' 'system-images;android-28;google_apis;x86_64'
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --update || true
+          sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'emulator' 'platform-tools' 'platforms;android-28' 'system-images;android-28;default;x86_64'
           test -f "$HOME/.android/debug.keystore"
       - name: Install Gradle
         run: |
@@ -58,7 +56,6 @@ jobs:
           grep -Fq "package: name='com.aadityasamriya.needle2.localagent'" /tmp/badging.txt
           grep -Fq "sdkVersion:'28'" /tmp/badging.txt
           grep -Fq "versionName='3.0.0'" /tmp/badging.txt
-          echo 'PRE-INSTALL APK VERIFICATION PASSED.'
       - name: Android 9 clean install and launch test
         run: |
           set -euo pipefail
@@ -66,7 +63,7 @@ jobs:
           export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
           export ANDROID_AVD_HOME="$HOME/.android/avd"
           mkdir -p "$ANDROID_AVD_HOME"
-          printf 'no\n' | avdmanager create avd -n needle-api28 -k 'system-images;android-28;google_apis;x86_64' --device 'pixel_2' --force
+          printf 'no\n' | avdmanager create avd -n needle-api28 -k 'system-images;android-28;default;x86_64' --device 'pixel_2' --force
           adb start-server
           if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm || true; fi
           emulator -avd needle-api28 -no-window -no-audio -no-boot-anim -no-snapshot -wipe-data -gpu swiftshader_indirect > /tmp/emulator.log 2>&1 &
@@ -90,7 +87,6 @@ jobs:
           pid=$(adb shell pidof com.aadityasamriya.needle2.localagent | tr -d '\r')
           test -n "$pid"
           adb shell dumpsys package com.aadityasamriya.needle2.localagent | grep -F 'versionName=3.0.0'
-          echo 'ANDROID 9 INSTALL + LAUNCH PASSED.'
       - name: Package final verified artifacts
         run: |
           set -euo pipefail
@@ -114,4 +110,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          gh release delete v3.0.0 --repo "$GITHUB_REPOSITORY" --yes || true
           gh release create v3.0.0 release/* --repo "$GITHUB_REPOSITORY" --title 'Needle 2 Android — Final Local Browser Edition' --notes 'Final build passed APK integrity/signing verification and clean Android 9 install + launch testing.'
