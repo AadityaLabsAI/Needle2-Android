@@ -47,8 +47,13 @@ jobs:
       - name: Build release APK
         run: gradle :app:assembleRelease --no-daemon --stacktrace
 
-      - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release.apk Needle2-Android-v1.0.0-arm64.apk
+      - name: Prepare APK
+        run: |
+          APK_PATH=$(find app/build/outputs/apk -type f -name '*.apk' | head -n 1)
+          test -n "$APK_PATH"
+          echo "Found APK: $APK_PATH"
+          cp "$APK_PATH" Needle2-Android-v1.0.0-arm64.apk
+          ls -lh Needle2-Android-v1.0.0-arm64.apk
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
