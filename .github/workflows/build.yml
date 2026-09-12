@@ -47,46 +47,53 @@ jobs:
       - name: Build signed release APK
         run: gradle :app:assembleRelease --no-daemon --stacktrace
 
-      - name: Verify APK signature and Android package
+      - name: Verify APK signature, package and offline playground assets
         run: |
           APK_PATH=$(find app/build/outputs/apk -type f -name '*.apk' | head -n 1)
           test -n "$APK_PATH"
           echo "Found APK: $APK_PATH"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK_PATH"
           unzip -t "$APK_PATH" >/dev/null
+          unzip -l "$APK_PATH" | grep -E 'assets/(needle2\.cact|playground/index\.html)' 
+          unzip -l "$APK_PATH" | grep 'lib/arm64-v8a/libneedle2_jni.so'
+          unzip -l "$APK_PATH" | grep 'lib/arm64-v8a/libc++_shared.so'
           mkdir -p release
-          cp "$APK_PATH" release/Needle2-Android-v1.0.1-arm64-signed.apk
-          sha256sum release/Needle2-Android-v1.0.1-arm64-signed.apk
-          ls -lh release/Needle2-Android-v1.0.1-arm64-signed.apk
+          cp "$APK_PATH" release/Needle2-Android-v1.1.0-arm64-signed.apk
+          sha256sum release/Needle2-Android-v1.1.0-arm64-signed.apk
+          ls -lh release/Needle2-Android-v1.1.0-arm64-signed.apk
 
       - name: Prepare install package ZIP
         run: |
-          mkdir -p package/Needle2-Android-v1.0.1
-          cp release/Needle2-Android-v1.0.1-arm64-signed.apk package/Needle2-Android-v1.0.1/base.apk
+          mkdir -p package/Needle2-Android-v1.1.0
+          cp release/Needle2-Android-v1.1.0-arm64-signed.apk package/Needle2-Android-v1.1.0/base.apk
           printf '%s\n' \
-            'Needle 2 Android v1.0.1' \
+            'Needle 2 Android v1.1.0' \
             'Signed ARM64 base APK for Android 9+.' \
+            'Offline Chrome playground is bundled.' \
             'Install base.apk after extracting this ZIP.' \
-            > package/Needle2-Android-v1.0.1/README.txt
-          cd package && zip -qr ../Needle2-Android-v1.0.1-arm64-package.zip Needle2-Android-v1.0.1
+            > package/Needle2-Android-v1.1.0/README.txt
+          cd package && zip -qr ../Needle2-Android-v1.1.0-arm64-package.zip Needle2-Android-v1.1.0
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.1
-          name: Needle 2 Android v1.0.1
+          tag_name: v1.1.0
+          name: Needle 2 Android v1.1.0
           body: |
-            Verified signed ARM64 Android package.
+            Crash-isolated offline playground build.
 
-            - Official Cactus Needle 2 engine
+            - Official Cactus Needle 2 engine and model
             - Fully local inference
             - Android 9+
             - arm64-v8a
-            - Signed APK verified with apksigner
-            - Also includes a ZIP package containing base.apk
+            - Main UI no longer loads native engine during startup
+            - Native engine runs in a separate Android process
+            - Offline localhost playground for Chrome
+            - Playground instructions included in the app
             - No Termux or Python required
+            - Signed APK verified with apksigner
           files: |
-            release/Needle2-Android-v1.0.1-arm64-signed.apk
-            Needle2-Android-v1.0.1-arm64-package.zip
+            release/Needle2-Android-v1.1.0-arm64-signed.apk
+            Needle2-Android-v1.1.0-arm64-package.zip
           make_latest: true
           prerelease: false
