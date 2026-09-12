@@ -8,7 +8,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <service android:name=".EngineService" android:process=":engine" android:exported="false" />
+        <service android:name=".LocalServerService" android:exported="false" />
         <service
             android:name=".AutomationAccessibilityService"
             android:label="Needle 2 Device Automation"
