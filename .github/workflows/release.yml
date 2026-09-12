@@ -1,4 +1,4 @@
-name: Needle 2 Android Release
+name: Needle 2 Android Fresh Release
 
 on: [push, workflow_dispatch]
 
@@ -8,10 +8,30 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - name: Download browser runtime and model
+
+      - name: Clean all previous GitHub releases, tags and Actions artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release list --limit 100 --json tagName --jq '.[].tagName' | while read -r tag; do
+            [ -n "$tag" ] || continue
+            gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes || true
+          done
+          gh api --paginate "/repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" --jq '.artifacts[].id' | while read -r id; do
+            [ -n "$id" ] || continue
+            gh api -X DELETE "/repos/$GITHUB_REPOSITORY/actions/artifacts/$id" || true
+          done
+          git fetch --tags --force || true
+          git tag -l | while read -r tag; do
+            [ -n "$tag" ] || continue
+            gh api -X DELETE "/repos/$GITHUB_REPOSITORY/git/refs/tags/$tag" || true
+          done
+
+      - name: Download official Needle 2 browser runtime and model
         run: |
           set -euo pipefail
           mkdir -p app/src/main/assets/runtime
@@ -22,110 +42,132 @@ jobs:
           echo 'b43aabfcaf1a6db6acf488076eab71d823c08697c7af4521fc1d174b60ede5ba  app/src/main/assets/runtime/needle2.cact' | sha256sum -c -
           test -s app/src/main/assets/runtime/needle.js
           test -s app/src/main/assets/runtime/needle.wasm
+          test -s app/src/main/assets/runtime/needle2.cact
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+
       - uses: android-actions/setup-android@v3
         with:
           cmdline-tools-version: 12266719
           accept-android-sdk-licenses: true
-      - name: Android build tools
+
+      - name: Install Android SDK and Android 9 test image
         run: |
+          set -euo pipefail
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
           sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'emulator' 'platforms;android-28' 'system-images;android-28;google_apis;x86_64'
-      - name: Gradle
+
+      - name: Install Gradle
         run: |
+          set -euo pipefail
           curl -fL --retry 3 https://services.gradle.org/distributions/gradle-8.7-bin.zip -o /tmp/gradle.zip
           unzip -q /tmp/gradle.zip -d /tmp
           echo '/tmp/gradle-8.7/bin' >> "$GITHUB_PATH"
-      - name: Build APK
+
+      - name: Build release APK
         run: gradle :app:assembleRelease --no-daemon --stacktrace
-      - name: Verify APK and test real Android 9 install
+
+      - name: Sign, verify and real-install-test APK on Android 9
         run: |
           set -euo pipefail
-          apk=$(find app/build/outputs/apk -type f -name '*.apk' | head -n 1)
+          apk=$(find app/build/outputs/apk/release -type f -name '*.apk' | head -n 1)
           test -n "$apk"
           echo "APK=$apk"
-          signature_output=$("$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --min-sdk-version 28 "$apk" 2>&1 || true)
+
+          # Re-sign deterministically for this CI build with all legacy/modern APK schemes.
+          ks="$HOME/.android/debug.keystore"
+          test -f "$ks"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
+            --ks "$ks" \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --ks-key-alias androiddebugkey \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            --v4-signing-enabled false \
+            "$apk"
+
+          signature_output=$("$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --min-sdk-version 28 "$apk" 2>&1)
           printf '%s\n' "$signature_output"
           echo "$signature_output" | grep -Fq 'Verified using v1 scheme (JAR signing): true'
           echo "$signature_output" | grep -Fq 'Verified using v2 scheme (APK Signature Scheme v2): true'
-          echo 'APK Signature Schemes v1 + v2 verified.'
+          echo "$signature_output" | grep -Fq 'Verified using v3 scheme (APK Signature Scheme v3): true'
+          echo 'APK v1 + v2 + v3 signatures verified.'
+
           unzip -t "$apk" >/dev/null
           unzip -Z1 "$apk" > /tmp/files
           grep -Fqx 'assets/playground/index.html' /tmp/files
           grep -Fqx 'assets/runtime/needle.js' /tmp/files
           grep -Fqx 'assets/runtime/needle.wasm' /tmp/files
           grep -Fqx 'assets/runtime/needle2.cact' /tmp/files
-          if grep -q '^lib/' /tmp/files; then echo 'ERROR: Native libraries must not be packaged.'; exit 1; fi
+          if grep -q '^lib/' /tmp/files; then
+            echo 'ERROR: native libraries must not be packaged.'
+            exit 1
+          fi
           "$ANDROID_HOME/build-tools/35.0.0/aapt2" dump badging "$apk" | tee /tmp/badging.txt
           grep -Fq "package: name='com.aadityasamriya.needle2.localagent'" /tmp/badging.txt
           grep -Fq "sdkVersion:'28'" /tmp/badging.txt
-          echo 'APK structure, package id, minSdk and signatures verified.'
+          echo 'APK contents, package id and minSdk verified.'
 
           export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
           export ANDROID_AVD_HOME="$HOME/.android/avd"
           mkdir -p "$ANDROID_AVD_HOME"
           printf 'no\n' | avdmanager create avd -n needle-api28 -k 'system-images;android-28;google_apis;x86_64' --device 'pixel_2' --force
-          test -f "$ANDROID_AVD_HOME/needle-api28.ini"
-          test -d "$ANDROID_AVD_HOME/needle-api28.avd"
           adb start-server
           if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm || true; fi
-          emulator -accel-check || true
           emulator -avd needle-api28 -no-window -no-audio -no-boot-anim -no-snapshot -wipe-data -gpu swiftshader_indirect > /tmp/emulator.log 2>&1 &
           emulator_pid=$!
           cleanup() { adb emu kill >/dev/null 2>&1 || true; kill "$emulator_pid" >/dev/null 2>&1 || true; }
           trap cleanup EXIT
 
-          if ! timeout 120s adb wait-for-device; then
-            echo 'ERROR: Android 9 emulator did not become available.'
-            tail -n 160 /tmp/emulator.log || true
-            exit 1
-          fi
+          timeout 120s adb wait-for-device
           booted=''
           for i in $(seq 1 120); do
             booted=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
-            if [ "$booted" = '1' ]; then break; fi
+            [ "$booted" = '1' ] && break
             sleep 2
           done
           if [ "$booted" != '1' ]; then
             echo 'ERROR: Android 9 emulator did not finish booting.'
-            echo '--- emulator log ---'
             tail -n 160 /tmp/emulator.log || true
-            echo '--- adb devices ---'
-            adb devices || true
             exit 1
           fi
           echo 'ANDROID 9 BOOT PASSED.'
 
-          echo '--- adb install ---'
-          adb install -r "$apk" | tee /tmp/install.log
-          echo '--- package path ---'
+          echo '--- CLEAN INSTALL ---'
+          adb install "$apk" | tee /tmp/install.log
+          grep -Fq 'Success' /tmp/install.log
           adb shell pm path com.aadityasamriya.needle2.localagent
-          echo '--- launch ---'
+
+          echo '--- LAUNCH ---'
           adb shell monkey -p com.aadityasamriya.needle2.localagent 1 | tee /tmp/launch.log
-          sleep 3
-          adb shell dumpsys activity activities | grep -F 'com.aadityasamriya.needle2.localagent' || true
-          echo 'REAL ANDROID 9 EMULATOR INSTALL + LAUNCH PASSED.'
+          sleep 5
+          adb shell dumpsys package com.aadityasamriya.needle2.localagent | grep -F 'versionName=2.1.0'
+          adb shell dumpsys activity activities | grep -F 'com.aadityasamriya.needle2.localagent'
+          echo 'REAL ANDROID 9 CLEAN INSTALL + LAUNCH PASSED.'
 
           mkdir -p release package
-          cp "$apk" release/Needle2-Android-v2.1.0-universal-signed.apk
-          sha256sum release/Needle2-Android-v2.1.0-universal-signed.apk | tee release/Needle2-Android-v2.1.0-universal-signed.apk.sha256
-          cp release/Needle2-Android-v2.1.0-universal-signed.apk package/base.apk
-          cp release/Needle2-Android-v2.1.0-universal-signed.apk.sha256 package/base.apk.sha256
-          printf '%s\n' 'Needle 2 Android v2.1.0' '' 'Android 9+.' 'Install the APK, open Needle 2 Local AI, enable Device Automation, then open the Local Agent in Chrome.' '' 'Needle 2 inference runs in browser WebAssembly. The APK contains the localhost bridge, accessibility service, UI, browser engine and model. No Termux, Python, cloud API, or Android native Needle runtime is required.' > package/README.txt
-          (cd package && zip -q ../release/Needle2-Android-v2.1.0-universal-package.zip base.apk base.apk.sha256 README.txt)
-          sha256sum release/Needle2-Android-v2.1.0-universal-package.zip | tee release/Needle2-Android-v2.1.0-universal-package.zip.sha256
+          cp "$apk" release/Needle2-Android-FRESH-Android9.apk
+          sha256sum release/Needle2-Android-FRESH-Android9.apk | tee release/Needle2-Android-FRESH-Android9.apk.sha256
+          cp release/Needle2-Android-FRESH-Android9.apk package/base.apk
+          cp release/Needle2-Android-FRESH-Android9.apk.sha256 package/base.apk.sha256
+          printf '%s\n' 'Needle 2 Android — Fresh Android 9 Build' '' 'Android 9+.' 'Install the APK, open Needle 2 Local AI, enable Device Automation, then open the Local Agent in Chrome.' '' 'Needle 2 inference runs locally in browser WebAssembly using the official Needle 2 runtime and model. No Termux, Python, cloud API, or Android native Needle runtime is required.' > package/README.txt
+          (cd package && zip -q ../release/Needle2-Android-FRESH-package.zip base.apk base.apk.sha256 README.txt)
+          sha256sum release/Needle2-Android-FRESH-package.zip | tee release/Needle2-Android-FRESH-package.zip.sha256
+
       - uses: actions/upload-artifact@v4
         with:
-          name: Needle2-Android-v2.1.0-browser-local
+          name: Needle2-Android-FRESH-verified
           path: release/*
           if-no-files-found: error
-      - name: Publish release with GitHub CLI
+
+      - name: Publish only the fresh release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release delete v2.1.0 --repo "$GITHUB_REPOSITORY" --yes 2>/dev/null || true
-          gh release create v2.1.0 release/* --repo "$GITHUB_REPOSITORY" --title 'Needle 2 Android v2.1.0 — Verified Android 9 Install' --generate-notes
+          gh release create v3.0.0 release/* --repo "$GITHUB_REPOSITORY" --title 'Needle 2 Android — Fresh Verified Android 9 Build' --notes 'Fresh local Android 9 build. APK passed v1/v2/v3 signature verification, APK structure checks, clean Android 9 emulator installation and launch.'
