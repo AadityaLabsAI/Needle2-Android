@@ -10,8 +10,17 @@ android {
         versionCode 1
         versionName '2.1.0'
     }
+    signingConfigs {
+        debug {
+            v1SigningEnabled true
+            v2SigningEnabled true
+        }
+    }
     buildTypes {
-        release { minifyEnabled false; signingConfig signingConfigs.debug }
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.debug
+        }
         debug { minifyEnabled false }
     }
 }
