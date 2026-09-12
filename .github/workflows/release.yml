@@ -10,11 +10,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Download model
+      - name: Download browser runtime and model
         run: |
-          mkdir -p app/src/main/assets
-          curl -fL --retry 3 'https://huggingface.co/Cactus-Compute/needle2/resolve/b739205bcda01f71ebf0ba180f75a885d515ad96/needle2.cact?download=true' -o app/src/main/assets/needle2.cact
-          echo 'b43aabfcaf1a6db6acf488076eab71d823c08697c7af4521fc1d174b60ede5ba  app/src/main/assets/needle2.cact' | sha256sum -c -
+          set -euo pipefail
+          mkdir -p app/src/main/assets/runtime
+          base='https://huggingface.co/Cactus-Compute/needle2/resolve/main'
+          curl -fL --retry 5 "$base/wasm/needle.js?download=true" -o app/src/main/assets/runtime/needle.js
+          curl -fL --retry 5 "$base/wasm/needle.wasm?download=true" -o app/src/main/assets/runtime/needle.wasm
+          curl -fL --retry 5 "$base/needle2.cact?download=true" -o app/src/main/assets/runtime/needle2.cact
+          echo 'b43aabfcaf1a6db6acf488076eab71d823c08697c7af4521fc1d174b60ede5ba  app/src/main/assets/runtime/needle2.cact' | sha256sum -c -
+          test -s app/src/main/assets/runtime/needle.js
+          test -s app/src/main/assets/runtime/needle.wasm
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -23,10 +29,10 @@ jobs:
         with:
           cmdline-tools-version: 12266719
           accept-android-sdk-licenses: true
-      - name: Android tools
+      - name: Android build tools
         run: |
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
-          sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0' 'ndk;27.2.12479018' 'cmake;3.31.6'
+          sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
       - name: Gradle
         run: |
           curl -fL --retry 3 https://services.gradle.org/distributions/gradle-8.7-bin.zip -o /tmp/gradle.zip
@@ -47,23 +53,23 @@ jobs:
           esac
           unzip -t "$apk" >/dev/null
           unzip -Z1 "$apk" > /tmp/files
-          grep -Fqx 'assets/needle2.cact' /tmp/files
           grep -Fqx 'assets/playground/index.html' /tmp/files
-          grep -Fqx 'lib/arm64-v8a/libneedle2_jni.so' /tmp/files
-          echo 'Required model, playground and ARM64 native library are present.'
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump xmltree "$apk" AndroidManifest.xml | grep -F 'AutomationAccessibilityService'
-          echo 'Accessibility service declaration verified in AndroidManifest.'
+          grep -Fqx 'assets/runtime/needle.js' /tmp/files
+          grep -Fqx 'assets/runtime/needle.wasm' /tmp/files
+          grep -Fqx 'assets/runtime/needle2.cact' /tmp/files
+          if grep -q '^lib/' /tmp/files; then echo 'ERROR: Native libraries must not be packaged.'; exit 1; fi
+          echo 'Verified: browser engine + model bundled; no Android native Needle library.'
           mkdir -p release package
-          cp "$apk" release/Needle2-Android-v1.3.2-arm64-signed.apk
-          sha256sum release/Needle2-Android-v1.3.2-arm64-signed.apk | tee release/Needle2-Android-v1.3.2-arm64-signed.apk.sha256
-          cp release/Needle2-Android-v1.3.2-arm64-signed.apk package/base.apk
-          cp release/Needle2-Android-v1.3.2-arm64-signed.apk.sha256 package/base.apk.sha256
-          printf '%s\n' 'Needle 2 Android v1.3.2' '' 'ARM64 Android 9+.' 'Install base.apk, open Needle 2 Local AI, enable Device Automation in Android Accessibility settings, then open the local Playground in Chrome.' '' 'Needle 2 model and native inference runtime are bundled locally. No cloud AI API or model download is required at runtime.' > package/README.txt
-          (cd package && zip -q ../release/Needle2-Android-v1.3.2-arm64-package.zip base.apk base.apk.sha256 README.txt)
-          sha256sum release/Needle2-Android-v1.3.2-arm64-package.zip | tee release/Needle2-Android-v1.3.2-arm64-package.zip.sha256
+          cp "$apk" release/Needle2-Android-v2.0.0-arm64-signed.apk
+          sha256sum release/Needle2-Android-v2.0.0-arm64-signed.apk | tee release/Needle2-Android-v2.0.0-arm64-signed.apk.sha256
+          cp release/Needle2-Android-v2.0.0-arm64-signed.apk package/base.apk
+          cp release/Needle2-Android-v2.0.0-arm64-signed.apk.sha256 package/base.apk.sha256
+          printf '%s\n' 'Needle 2 Android v2.0.0' '' 'Android 9+.' 'Install the APK, open Needle 2 Local AI, enable Device Automation, then open the Local Agent in Chrome.' '' 'Needle 2 inference runs in browser WebAssembly. The APK contains only the localhost bridge, accessibility service, UI, browser engine and model. No Termux, Python, cloud API, or Android native Needle runtime is required.' > package/README.txt
+          (cd package && zip -q ../release/Needle2-Android-v2.0.0-arm64-package.zip base.apk base.apk.sha256 README.txt)
+          sha256sum release/Needle2-Android-v2.0.0-arm64-package.zip | tee release/Needle2-Android-v2.0.0-arm64-package.zip.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: Needle2-Android-v1.3.2-arm64
+          name: Needle2-Android-v2.0.0-browser-local
           path: release/*
           if-no-files-found: error
       - name: Publish release with GitHub CLI
@@ -71,4 +77,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release create v1.3.2 release/* --repo "$GITHUB_REPOSITORY" --title 'Needle 2 Android v1.3.2' --generate-notes
+          gh release delete v2.0.0 --repo "$GITHUB_REPOSITORY" --yes 2>/dev/null || true
+          gh release create v2.0.0 release/* --repo "$GITHUB_REPOSITORY" --title 'Needle 2 Android v2.0.0 — Browser Local' --generate-notes
