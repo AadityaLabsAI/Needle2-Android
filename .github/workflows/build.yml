@@ -1,9 +1,6 @@
 name: Build and Release Needle 2 Android
 
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
+on: [push, workflow_dispatch]
 
 permissions:
   contents: write
@@ -16,6 +13,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download official Needle 2 model
+        shell: bash
         run: |
           set -euo pipefail
           mkdir -p app/src/main/assets
@@ -36,12 +34,14 @@ jobs:
           packages: tools platform-tools
 
       - name: Install Android SDK, NDK and CMake
+        shell: bash
         run: |
           set -euo pipefail
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
           sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0' 'ndk;27.2.12479018' 'cmake;3.31.6'
 
       - name: Install Gradle 8.7
+        shell: bash
         run: |
           set -euo pipefail
           curl -fL --retry 3 https://services.gradle.org/distributions/gradle-8.7-bin.zip -o /tmp/gradle.zip
@@ -49,22 +49,18 @@ jobs:
           echo '/tmp/gradle-8.7/bin' >> "$GITHUB_PATH"
 
       - name: Build release APK
+        shell: bash
         run: gradle :app:assembleRelease --no-daemon --stacktrace
 
-      - name: Verify APK and package contents
+      - name: Verify release APK
+        shell: bash
         run: |
           set -euo pipefail
           APK_PATH=$(find app/build/outputs/apk -type f -name '*.apk' | head -n 1)
           test -n "$APK_PATH"
-          echo "APK: $APK_PATH"
-
-          echo '--- Android APK signature verification ---'
+          echo "APK=$APK_PATH"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --min-sdk-version 28 "$APK_PATH"
-          echo 'Signature verification passed.'
-
-          echo '--- ZIP integrity ---'
           unzip -t "$APK_PATH" >/dev/null
-
           ZIP_LIST=$(mktemp)
           unzip -Z1 "$APK_PATH" > "$ZIP_LIST"
           grep -qx 'assets/needle2.cact' "$ZIP_LIST"
@@ -72,46 +68,37 @@ jobs:
           grep -qx 'lib/arm64-v8a/libneedle2_jni.so' "$ZIP_LIST"
           grep -qx 'lib/arm64-v8a/libc++_shared.so' "$ZIP_LIST"
           grep -qx 'res/xml/accessibility_service_config.xml' "$ZIP_LIST"
-          echo 'Required model, web console, native runtime and accessibility service are present.'
-
+          echo 'All required APK components verified.'
           mkdir -p release
-          cp "$APK_PATH" release/Needle2-Android-v1.3.1-arm64-signed.apk
-          sha256sum release/Needle2-Android-v1.3.1-arm64-signed.apk | tee release/Needle2-Android-v1.3.1-arm64-signed.apk.sha256
+          cp "$APK_PATH" release/Needle2-Android-v1.3.2-arm64-signed.apk
+          sha256sum release/Needle2-Android-v1.3.2-arm64-signed.apk | tee release/Needle2-Android-v1.3.2-arm64-signed.apk.sha256
 
-      - name: Prepare install package
+      - name: Create install package
+        shell: bash
         run: |
           set -euo pipefail
           mkdir -p package
-          cp release/Needle2-Android-v1.3.1-arm64-signed.apk package/base.apk
-          cp release/Needle2-Android-v1.3.1-arm64-signed.apk.sha256 package/base.apk.sha256
-          cat > package/README.txt <<'EOF'
-Needle 2 Android v1.3.1
+          cp release/Needle2-Android-v1.3.2-arm64-signed.apk package/base.apk
+          cp release/Needle2-Android-v1.3.2-arm64-signed.apk.sha256 package/base.apk.sha256
+          printf '%s\n' 'Needle 2 Android v1.3.2' '' 'ARM64 Android 9+.' 'Install base.apk, open Needle 2 Local AI, enable Device Automation in Accessibility settings, then open the local Playground in Chrome.' '' 'The Needle 2 model and native inference runtime are bundled locally. No cloud AI API or model download is required at runtime.' > package/README.txt
+          (cd package && zip -q ../release/Needle2-Android-v1.3.2-arm64-package.zip base.apk base.apk.sha256 README.txt)
+          sha256sum release/Needle2-Android-v1.3.2-arm64-package.zip | tee release/Needle2-Android-v1.3.2-arm64-package.zip.sha256
 
-ARM64 Android 9+.
-Install base.apk, open Needle 2 Local AI, enable Device Automation in Android Accessibility settings, then open the local Playground in Chrome.
-
-Needle 2 model and native inference runtime are bundled in the APK. No cloud AI API or model download is required at runtime.
-EOF
-          cd package
-          zip -q ../release/Needle2-Android-v1.3.1-arm64-package.zip base.apk base.apk.sha256 README.txt
-          cd ..
-          sha256sum release/Needle2-Android-v1.3.1-arm64-package.zip | tee release/Needle2-Android-v1.3.1-arm64-package.zip.sha256
-
-      - name: Upload verified build artifacts
+      - name: Upload verified artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Needle2-Android-v1.3.1-arm64
+          name: Needle2-Android-v1.3.2-arm64
           path: release/*
           if-no-files-found: error
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.3.1
-          name: Needle 2 Android v1.3.1
+          tag_name: v1.3.2
+          name: Needle 2 Android v1.3.2
           generate_release_notes: true
           files: |
-            release/Needle2-Android-v1.3.1-arm64-signed.apk
-            release/Needle2-Android-v1.3.1-arm64-signed.apk.sha256
-            release/Needle2-Android-v1.3.1-arm64-package.zip
-            release/Needle2-Android-v1.3.1-arm64-package.zip.sha256
+            release/Needle2-Android-v1.3.2-arm64-signed.apk
+            release/Needle2-Android-v1.3.2-arm64-signed.apk.sha256
+            release/Needle2-Android-v1.3.2-arm64-package.zip
+            release/Needle2-Android-v1.3.2-arm64-package.zip.sha256
