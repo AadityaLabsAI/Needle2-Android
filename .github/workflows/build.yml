@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   build:
@@ -48,7 +50,7 @@ jobs:
           unzip -q /tmp/gradle.zip -d /tmp
           echo '/tmp/gradle-8.7/bin' >> "$GITHUB_PATH"
 
-      - name: Build signed release APK
+      - name: Build release APK
         run: gradle :app:assembleRelease --no-daemon --stacktrace
 
       - name: Verify APK signature, package, native libraries and automation service
@@ -56,16 +58,15 @@ jobs:
           set -euo pipefail
           APK_PATH=$(find app/build/outputs/apk -type f -name '*.apk' | head -n 1)
           test -n "$APK_PATH"
+          echo "APK: $APK_PATH"
+
           echo '--- APK signature verification ---'
-          SIGNATURE_OUTPUT=$("$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK_PATH" 2>&1 || true)
-          printf '%s\n' "$SIGNATURE_OUTPUT"
-          V2_STATUS=$(printf '%s\n' "$SIGNATURE_OUTPUT" | sed -n 's/^Verified using v2 scheme.*: \(true\|false\)$/\1/p' | head -n 1)
-          if [ "$V2_STATUS" != "true" ]; then
-            echo 'ERROR: APK Signature Scheme v2 verification failed.'
-            exit 1
-          fi
-          echo 'V2 APK signature verified.'
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --min-sdk-version 28 "$APK_PATH"
+          echo 'APK signature verification passed for Android API 28+.'
+
+          echo '--- APK integrity ---'
           unzip -t "$APK_PATH" >/dev/null
+
           ZIP_LIST=$(mktemp)
           unzip -Z1 "$APK_PATH" > "$ZIP_LIST"
           grep -qx 'assets/needle2.cact' "$ZIP_LIST"
@@ -73,46 +74,54 @@ jobs:
           grep -qx 'lib/arm64-v8a/libneedle2_jni.so' "$ZIP_LIST"
           grep -qx 'lib/arm64-v8a/libc++_shared.so' "$ZIP_LIST"
           grep -qx 'res/xml/accessibility_service_config.xml' "$ZIP_LIST"
-          echo 'APK contents verified.'
+          echo 'Required model, playground, native runtime and accessibility resources verified.'
+
           mkdir -p release
-          cp "$APK_PATH" release/Needle2-Android-v1.2.0-arm64-signed.apk
-          sha256sum release/Needle2-Android-v1.2.0-arm64-signed.apk | tee release/Needle2-Android-v1.2.0-arm64-signed.apk.sha256
-          ls -lh release/Needle2-Android-v1.2.0-arm64-signed.apk
+          cp "$APK_PATH" release/Needle2-Android-v1.3.0-arm64-signed.apk
+          sha256sum release/Needle2-Android-v1.3.0-arm64-signed.apk | tee release/Needle2-Android-v1.3.0-arm64-signed.apk.sha256
+          ls -lh release/Needle2-Android-v1.3.0-arm64-signed.apk
 
       - name: Prepare install package ZIP
         run: |
           set -euo pipefail
           mkdir -p package
-          cp release/Needle2-Android-v1.2.0-arm64-signed.apk package/base.apk
-          cp release/Needle2-Android-v1.2.0-arm64-signed.apk.sha256 package/base.apk.sha256
+          cp release/Needle2-Android-v1.3.0-arm64-signed.apk package/base.apk
+          cp release/Needle2-Android-v1.3.0-arm64-signed.apk.sha256 package/base.apk.sha256
           cat > package/README.txt <<'EOF'
-Needle 2 Android v1.2.0
+Needle 2 Android v1.3.0
 
 Install base.apk on an Android ARM64 device.
 After installation, open Needle 2 Local AI, enable Device Automation in Android Accessibility settings, then open the local Playground in Chrome.
 
-The model and inference runtime are bundled locally. No cloud AI API is required.
+The Needle 2 model and native inference runtime are bundled locally. No cloud AI API or model download is required at runtime.
+
+Supported target: Android 9+ ARM64 (arm64-v8a).
 EOF
           cd package
-          zip -q ../release/Needle2-Android-v1.2.0-arm64-package.zip base.apk base.apk.sha256 README.txt
+          zip -q ../release/Needle2-Android-v1.3.0-arm64-package.zip base.apk base.apk.sha256 README.txt
           cd ..
-          sha256sum release/Needle2-Android-v1.2.0-arm64-package.zip | tee release/Needle2-Android-v1.2.0-arm64-package.zip.sha256
+          sha256sum release/Needle2-Android-v1.3.0-arm64-package.zip | tee release/Needle2-Android-v1.3.0-arm64-package.zip.sha256
+
+      - name: Generate build provenance attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: release/Needle2-Android-v1.3.0-arm64-signed.apk
 
       - name: Upload verified build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Needle2-Android-v1.2.0-arm64
+          name: Needle2-Android-v1.3.0-arm64
           path: release/*
           if-no-files-found: error
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.2.0
-          name: Needle 2 Android v1.2.0
+          tag_name: v1.3.0
+          name: Needle 2 Android v1.3.0
           generate_release_notes: true
           files: |
-            release/Needle2-Android-v1.2.0-arm64-signed.apk
-            release/Needle2-Android-v1.2.0-arm64-signed.apk.sha256
-            release/Needle2-Android-v1.2.0-arm64-package.zip
-            release/Needle2-Android-v1.2.0-arm64-package.zip.sha256
+            release/Needle2-Android-v1.3.0-arm64-signed.apk
+            release/Needle2-Android-v1.3.0-arm64-signed.apk.sha256
+            release/Needle2-Android-v1.3.0-arm64-package.zip
+            release/Needle2-Android-v1.3.0-arm64-package.zip.sha256
