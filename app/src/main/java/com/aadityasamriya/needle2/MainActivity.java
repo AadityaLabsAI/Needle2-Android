@@ -6,9 +6,6 @@ import android.os.BatteryManager;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
-import android.view.View;
-import android.view.inputmethod.InputMethodManager;
-import android.content.Context;
 import android.graphics.Typeface;
 import android.widget.Button;
 import android.widget.EditText;
@@ -111,8 +108,7 @@ public class MainActivity extends Activity {
         output.append("\nYou: " + query + "\n");
         executor.execute(() -> {
             try {
-                String response = NativeNeedle.complete(query, 256);
-                String finalText = handleToolCall(response);
+                String finalText = runAgentTurn(query);
                 main.post(() -> { output.append("Needle: " + finalText + "\n"); send.setEnabled(true); });
             } catch (Exception e) {
                 main.post(() -> { output.append("Error: " + e.getMessage() + "\n"); send.setEnabled(true); });
@@ -120,36 +116,44 @@ public class MainActivity extends Activity {
         });
     }
 
-    private String handleToolCall(String response) throws Exception {
-        JSONObject obj = new JSONObject(response);
-        JSONArray calls = obj.optJSONArray("function_calls");
-        if (calls == null || calls.length() == 0) return response;
-        JSONArray results = new JSONArray();
-        for (int i = 0; i < calls.length(); i++) {
-            JSONObject call = calls.getJSONObject(i);
-            String name = call.optString("name");
-            JSONObject args = call.optJSONObject("arguments");
-            JSONObject result = new JSONObject();
-            result.put("name", name);
-            if ("get_battery".equals(name)) {
-                BatteryManager bm = (BatteryManager) getSystemService(BATTERY_SERVICE);
-                int level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);
-                result.put("battery_percent", level);
-                result.put("charging", bm.isCharging());
-            } else if ("get_time".equals(name)) {
-                result.put("local_time", DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.MEDIUM, Locale.getDefault()).format(new Date()));
-            } else {
-                result.put("error", "Unknown tool");
+    private String runAgentTurn(String query) throws Exception {
+        String response = NativeNeedle.complete(query, 256);
+        for (int round = 0; round < 4; round++) {
+            JSONObject obj = new JSONObject(response);
+            JSONArray calls = obj.optJSONArray("function_calls");
+            if (calls == null || calls.length() == 0) {
+                String reasoning = obj.optString("reasoning", "");
+                return reasoning.isEmpty() ? response : reasoning;
             }
-            results.put(result);
+            // Needle's documented multi-turn contract feeds each tool result back as the next complete().
+            for (int i = 0; i < calls.length(); i++) {
+                JSONObject call = calls.getJSONObject(i);
+                String name = call.optString("name");
+                JSONObject result = executeTool(name);
+                response = NativeNeedle.complete(result.toString(), 256);
+                JSONObject next = new JSONObject(response);
+                JSONArray nextCalls = next.optJSONArray("function_calls");
+                if (nextCalls == null || nextCalls.length() == 0) {
+                    String reasoning = next.optString("reasoning", "");
+                    return reasoning.isEmpty() ? response : reasoning;
+                }
+            }
         }
-        JSONObject feed = new JSONObject();
-        feed.put("tool_results", results);
-        String second = NativeNeedle.complete(feed.toString(), 256);
-        JSONObject finalObj = new JSONObject(second);
-        String reasoning = finalObj.optString("reasoning", "");
-        if (finalObj.optString("type", "").equals("respond")) return reasoning.isEmpty() ? second : reasoning;
-        return second;
+        return response;
+    }
+
+    private JSONObject executeTool(String name) throws Exception {
+        JSONObject result = new JSONObject();
+        if ("get_battery".equals(name)) {
+            BatteryManager bm = (BatteryManager) getSystemService(BATTERY_SERVICE);
+            result.put("battery_percent", bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY));
+            result.put("charging", bm.isCharging());
+        } else if ("get_time".equals(name)) {
+            result.put("local_time", DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.MEDIUM, Locale.getDefault()).format(new Date()));
+        } else {
+            result.put("error", "Unknown tool: " + name);
+        }
+        return result;
     }
 
     private static byte[] readAll(InputStream in) throws Exception {
