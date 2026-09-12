@@ -1,42 +1,41 @@
-# Needle 2 Local AI Device Agent
+# Needle 2 Android — Browser Local Agent
 
-An Android 9+ ARM64 local AI device-agent built around Cactus Compute Needle 2. Designed first for the OPPO A11k (CPH2083).
-
-## What it does
-
-- Runs the Needle 2 model locally on-device.
-- Uses Android AccessibilityService for user-enabled UI automation.
-- Can read visible screen text, tap visible labels, type text, tap coordinates, swipe, press Back/Home, launch installed apps and open URLs.
-- Provides local battery/time tools.
-- Hosts an offline playground at `http://127.0.0.1:8765/` that can be opened in Chrome.
-- No Termux, Python, cloud API or remote inference required.
-
-## First-time setup
-
-1. Install the signed ARM64 APK.
-2. Open the app.
-3. Tap **Enable Device Automation**.
-4. In Android Accessibility settings, enable **Needle 2 Device Automation**.
-5. Return to the app.
-6. Tap **Open Playground in Chrome**.
-7. Give the agent natural-language commands.
-
-AccessibilityService is explicitly user-enabled. Android controls the service lifecycle and permission; the app cannot silently enable it.
+This project is intentionally lightweight.
 
 ## Architecture
 
-The UI/server process and native Needle engine run separately. The engine process calls the main-process automation bridge only through loopback. This isolates a native engine failure from the main UI as much as practical.
+```text
+Android APK
+  ├─ localhost HTTP bridge (127.0.0.1:8765)
+  ├─ Accessibility automation service
+  └─ bundled browser assets
+        ↓
+Chrome
+  ├─ Needle 2 WebAssembly engine
+  ├─ bundled needle2.cact model
+  └─ local tool-calling agent
+```
 
-The official Needle 2 model supports structured function calls and is intended for tool calling/device use rather than unrestricted general chat. The app follows the documented `function_calls[].arguments` contract.
+The Android APK does **not** load the Needle native/JNI engine. This avoids device-specific native crashes and keeps Android responsible only for the automation bridge.
+
+## User experience
+
+1. Install the APK.
+2. Open it once.
+3. Enable **Needle 2 Device Automation** in Android Accessibility settings.
+4. Open **Local Agent in Chrome**.
+5. Use natural-language device commands locally.
+
+No Termux, Python, cloud AI API, remote inference, or model download is required at runtime.
+
+## Browser inference
+
+Needle 2 officially publishes a WebAssembly browser build (`needle.js` + `needle.wasm`) and accepts the `.cact` model through `needle_load`. The release workflow bundles these files into the APK so the setup is one-install-and-run.
 
 ## Safety
 
-The agent is limited to declared tools. The system prompt instructs it to ask for confirmation before risky or irreversible actions such as purchases, message sending, deletion or account changes. Android privileged operations still require the relevant OS permission and may not be automatable.
+The agent uses Android Accessibility only after the user explicitly enables it. Risky or irreversible operations should request confirmation in the browser agent before execution.
 
 ## Build
 
-GitHub Actions downloads the official Cactus ARM64 engine and model at build time, verifies the model SHA-256, builds a signed APK, and verifies the APK contents, native libraries and accessibility-service resource before publishing the release package.
-
-## License
-
-This wrapper project is Apache-2.0 compatible. The Cactus Needle 2 engine/model remain subject to their upstream Apache-2.0 license and notices.
+GitHub Actions downloads the official Needle 2 WebAssembly runtime and model, builds the APK, verifies its signature, verifies that the browser runtime/model are present, and fails if Android native libraries are packaged.
