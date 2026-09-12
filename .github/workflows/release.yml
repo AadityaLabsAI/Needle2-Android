@@ -8,6 +8,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Download browser runtime and model
@@ -45,6 +46,7 @@ jobs:
           set -euo pipefail
           apk=$(find app/build/outputs/apk -type f -name '*.apk' | head -n 1)
           test -n "$apk"
+          echo "APK=$apk"
           signature_output=$("$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --min-sdk-version 28 "$apk" 2>&1 || true)
           printf '%s\n' "$signature_output"
           case "$signature_output" in
@@ -61,7 +63,8 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/aapt2" dump badging "$apk" | tee /tmp/badging.txt
           grep -Fq "package: name='com.aadityasamriya.needle2.localagent'" /tmp/badging.txt
           grep -Fq "sdkVersion:'28'" /tmp/badging.txt
-          echo 'APK structure, package id, minSdk and v2 signature verified.'
+          echo 'APK structure, package id, minSdk and signature verified.'
+
           export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
           export ANDROID_AVD_HOME="$HOME/.android/avd"
           mkdir -p "$ANDROID_AVD_HOME"
@@ -75,27 +78,38 @@ jobs:
           emulator_pid=$!
           cleanup() { adb emu kill >/dev/null 2>&1 || true; kill "$emulator_pid" >/dev/null 2>&1 || true; }
           trap cleanup EXIT
-          if ! timeout 60s adb wait-for-device; then
+
+          if ! timeout 120s adb wait-for-device; then
             echo 'ERROR: Android 9 emulator did not become available.'
-            tail -n 120 /tmp/emulator.log || true
+            tail -n 160 /tmp/emulator.log || true
             exit 1
           fi
           booted=''
-          for i in $(seq 1 90); do
+          for i in $(seq 1 120); do
             booted=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
-            [ "$booted" = '1' ] && break
+            if [ "$booted" = '1' ]; then break; fi
             sleep 2
           done
           if [ "$booted" != '1' ]; then
             echo 'ERROR: Android 9 emulator did not finish booting.'
-            tail -n 120 /tmp/emulator.log || true
-            adb shell getprop 2>/dev/null | tail -n 40 || true
+            echo '--- emulator log ---'
+            tail -n 160 /tmp/emulator.log || true
+            echo '--- adb devices ---'
+            adb devices || true
             exit 1
           fi
-          adb install -r "$apk"
+          echo 'ANDROID 9 BOOT PASSED.'
+
+          echo '--- adb install ---'
+          adb install -r "$apk" | tee /tmp/install.log
+          echo '--- package path ---'
           adb shell pm path com.aadityasamriya.needle2.localagent
-          adb shell monkey -p com.aadityasamriya.needle2.localagent 1 >/dev/null
+          echo '--- launch ---'
+          adb shell monkey -p com.aadityasamriya.needle2.localagent 1 | tee /tmp/launch.log
+          sleep 3
+          adb shell dumpsys activity activities | grep -F 'com.aadityasamriya.needle2.localagent' || true
           echo 'REAL ANDROID 9 EMULATOR INSTALL + LAUNCH PASSED.'
+
           mkdir -p release package
           cp "$apk" release/Needle2-Android-v2.1.0-arm64-signed.apk
           sha256sum release/Needle2-Android-v2.1.0-arm64-signed.apk | tee release/Needle2-Android-v2.1.0-arm64-signed.apk.sha256
