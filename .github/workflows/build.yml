@@ -1,21 +1,22 @@
-name: Build Needle 2 Android
+name: Build and Release Needle 2 Android
 
 on:
-  workflow_dispatch:
   push:
     branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download official Needle 2 weights
+      - name: Download official Needle 2 model
         run: |
           mkdir -p app/src/main/assets
           curl -fL --retry 3 \
@@ -23,7 +24,7 @@ jobs:
             -o app/src/main/assets/needle2.cact
           echo 'b43aabfcaf1a6db6acf488076eab71d823c08697c7af4521fc1d174b60ede5ba  app/src/main/assets/needle2.cact' | sha256sum -c -
 
-      - name: Set up JDK
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -32,20 +33,36 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK/NDK/CMake
+      - name: Install Android SDK, NDK and CMake
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;27.2.12479018' 'cmake;3.31.6'
 
-      - name: Generate Gradle wrapper
-        run: gradle wrapper --gradle-version 8.7
+      - name: Install Gradle 8.7
+        run: |
+          curl -fL --retry 3 https://services.gradle.org/distributions/gradle-8.7-bin.zip -o /tmp/gradle.zip
+          unzip -q /tmp/gradle.zip -d /tmp
+          echo "/tmp/gradle-8.7/bin" >> "$GITHUB_PATH"
 
-      - name: Build debug APK
-        run: ./gradlew :app:assembleDebug --no-daemon
+      - name: Build release APK
+        run: gradle :app:assembleRelease --no-daemon --stacktrace
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - name: Rename APK
+        run: cp app/build/outputs/apk/release/app-release.apk Needle2-Android-v1.0.0-arm64.apk
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
         with:
-          name: Needle2-Android-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
+          tag_name: v1.0.0
+          name: Needle 2 Android v1.0.0
+          body: |
+            Ready-to-install Needle 2 Android APK for ARM64 Android devices.
+
+            - Official Cactus Needle 2 engine
+            - Fully local inference
+            - Android 9+
+            - arm64-v8a
+            - No Termux or Python required
+          files: Needle2-Android-v1.0.0-arm64.apk
+          make_latest: true
+          prerelease: false
