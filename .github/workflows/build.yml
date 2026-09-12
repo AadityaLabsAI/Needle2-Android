@@ -44,30 +44,49 @@ jobs:
           unzip -q /tmp/gradle.zip -d /tmp
           echo "/tmp/gradle-8.7/bin" >> "$GITHUB_PATH"
 
-      - name: Build release APK
+      - name: Build signed release APK
         run: gradle :app:assembleRelease --no-daemon --stacktrace
 
-      - name: Prepare APK
+      - name: Verify APK signature and Android package
         run: |
           APK_PATH=$(find app/build/outputs/apk -type f -name '*.apk' | head -n 1)
           test -n "$APK_PATH"
           echo "Found APK: $APK_PATH"
-          cp "$APK_PATH" Needle2-Android-v1.0.0-arm64.apk
-          ls -lh Needle2-Android-v1.0.0-arm64.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK_PATH"
+          unzip -t "$APK_PATH" >/dev/null
+          mkdir -p release
+          cp "$APK_PATH" release/Needle2-Android-v1.0.1-arm64-signed.apk
+          sha256sum release/Needle2-Android-v1.0.1-arm64-signed.apk
+          ls -lh release/Needle2-Android-v1.0.1-arm64-signed.apk
+
+      - name: Prepare install package ZIP
+        run: |
+          mkdir -p package/Needle2-Android-v1.0.1
+          cp release/Needle2-Android-v1.0.1-arm64-signed.apk package/Needle2-Android-v1.0.1/base.apk
+          printf '%s\n' \
+            'Needle 2 Android v1.0.1' \
+            'Signed ARM64 base APK for Android 9+.' \
+            'Install base.apk after extracting this ZIP.' \
+            > package/Needle2-Android-v1.0.1/README.txt
+          cd package && zip -qr ../Needle2-Android-v1.0.1-arm64-package.zip Needle2-Android-v1.0.1
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.0
-          name: Needle 2 Android v1.0.0
+          tag_name: v1.0.1
+          name: Needle 2 Android v1.0.1
           body: |
-            Ready-to-install Needle 2 Android APK for ARM64 Android devices.
+            Verified signed ARM64 Android package.
 
             - Official Cactus Needle 2 engine
             - Fully local inference
             - Android 9+
             - arm64-v8a
+            - Signed APK verified with apksigner
+            - Also includes a ZIP package containing base.apk
             - No Termux or Python required
-          files: Needle2-Android-v1.0.0-arm64.apk
+          files: |
+            release/Needle2-Android-v1.0.1-arm64-signed.apk
+            Needle2-Android-v1.0.1-arm64-package.zip
           make_latest: true
           prerelease: false
