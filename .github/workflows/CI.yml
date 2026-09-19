@@ -1,68 +1,31 @@
-name: Linux CI
+name: Needle2 Core CI
+
 on:
   workflow_dispatch:
   push:
     branches: [main]
     paths:
-      - "crates/common/**"
-      - "crates/agent/**"
-      - "crates/gui/**"
+      - "crates/mobile-core/**"
       - "Cargo.toml"
       - "Cargo.lock"
-      - "Dockerfile"
       - ".github/workflows/CI.yml"
   pull_request:
     paths:
-      - "crates/common/**"
-      - "crates/agent/**"
-      - "crates/gui/**"
+      - "crates/mobile-core/**"
       - "Cargo.toml"
       - "Cargo.lock"
-      - "Dockerfile"
       - ".github/workflows/CI.yml"
+
 permissions:
   contents: read
+
 jobs:
-  linter:
+  mobile-core:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Create builder image
-        run: docker build . -t airgorah_builder
-      - name: Clippy
-        run: docker run --rm -v ${{ github.workspace }}:/workspace airgorah_builder cargo clippy --all --all-features -- -D warnings
-      - name: Format
-        run: docker run --rm -v ${{ github.workspace }}:/workspace airgorah_builder cargo fmt --all -- --check
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [x86_64, aarch64]
-        include:
-        - arch: x86_64
-          runner: ubuntu-24.04
-        - arch: aarch64
-          runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
-    needs: linter
-    steps:
-      - uses: actions/checkout@v4
-      - name: Create builder image
-        run: docker build . -t airgorah_builder
-      - name: Build project
-        run: docker run --rm -v ${{ github.workspace }}:/workspace airgorah_builder
-      - uses: actions/upload-artifact@v4
-        with:
-          name: airgorah_${{ matrix.arch }}.deb
-          path: ./airgorah_${{ matrix.arch }}.deb
-          if-no-files-found: error
-      - uses: actions/upload-artifact@v4
-        with:
-          name: airgorah_${{ matrix.arch }}.rpm
-          path: ./airgorah_${{ matrix.arch }}.rpm
-          if-no-files-found: error
-      - uses: actions/upload-artifact@v4
-        with:
-          name: airgorah_${{ matrix.arch }}.pkg.tar.zst
-          path: ./airgorah_${{ matrix.arch }}.pkg.tar.zst
-          if-no-files-found: error
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test mobile core
+        run: cargo test -p needle2-mobile-core
+      - name: Format mobile core
+        run: cargo fmt --all -- --check
