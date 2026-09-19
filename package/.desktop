@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Airgorah
+Comment=A WiFi security auditing software
+Exec=airgorah
+Icon=/usr/share/pixmaps/airgorah.png
+Categories=Network;Monitor;GTK;
+StartupWMClass=com.molivier.airgorah
+Type=Application
+Terminal=false
