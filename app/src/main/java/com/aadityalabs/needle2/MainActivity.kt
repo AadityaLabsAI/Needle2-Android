@@ -130,7 +130,8 @@ class MainActivity : Activity() {
     }
 
     private fun startWifiScan() {
-        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED ||
+            (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.NEARBY_WIFI_DEVICES) != PackageManager.PERMISSION_GRANTED)) {
             requestNeededPermissions()
             return
         }
@@ -140,7 +141,12 @@ class MainActivity : Activity() {
                 showResults()
             }
         }
-        registerReceiver(receiver, IntentFilter(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION))
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(receiver, IntentFilter(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION), Context.RECEIVER_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(receiver, IntentFilter(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION))
+        }
         val started = try { wifi.startScan() } catch (_: SecurityException) { false }
         status.text = if (started) "SCANNING…\n\nAndroid may throttle repeated scans." else "SCAN FAILED\n\nCheck Wi‑Fi, permissions and location services."
     }
