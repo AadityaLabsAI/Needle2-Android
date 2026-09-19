@@ -5,7 +5,7 @@
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" android:usesPermissionFlags="neverForLocation"/>
     <uses-feature android:name="android.hardware.wifi" android:required="false"/>
     <uses-feature android:name="android.hardware.usb.host" android:required="false"/>
-    <application android:theme="@style/AppTheme" android:label="Needle2" android:allowBackup="true" android:supportsRtl="true">
+    <application android:theme="@style/AppTheme" android:label="Needle2" android:icon="@drawable/airgorah_logo" android:roundIcon="@drawable/airgorah_logo" android:allowBackup="true" android:supportsRtl="true">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
