@@ -117,6 +117,13 @@ class MainActivity : Activity() {
             append("Location services    ${if (locationEnabled) "ON" else "OFF"}\n")
             append("USB host             ${if (usbHost) "AVAILABLE" else "NOT AVAILABLE"}\n")
             append("USB devices          ${usb.deviceList.size}\n")
+            val adapters = usbAdapters.listAdapters()
+            if (adapters.isNotEmpty()) {
+                append("\nUSB WI-FI ADAPTERS\n")
+                adapters.take(3).forEach { adapter ->
+                    append("${adapter.deviceName}  (${adapter.vendorId}:${adapter.productId})\n")
+                }
+            }
             append("Monitor / injection  HARDWARE + OS DEPENDENT\n")
             append("Passive scan         READY")
         }
@@ -143,7 +150,9 @@ class MainActivity : Activity() {
         aps.addAll(try { wifi.scanResults } catch (_: SecurityException) { emptyList() })
         list.removeAllViews()
         val sorted = aps.sortedWith(compareByDescending<ScanResult> { it.level }.thenBy { it.SSID })
-        status.text = "NETWORK INVENTORY\n\n${sorted.size} access points discovered"
+        val audit = AuditReport.summary(sorted)
+        status.text = "NETWORK INVENTORY\n\n${sorted.size} access points discovered\n" +
+            "Protected: ${audit.protected}  •  Open: ${audit.open}  •  Legacy WEP: ${audit.legacy}"
         for (ap in sorted) {
             val band = when {
                 ap.frequency in 2400..2500 -> "2.4 GHz"
