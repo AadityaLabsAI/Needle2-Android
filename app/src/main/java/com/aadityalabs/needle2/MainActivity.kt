@@ -21,6 +21,7 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var list: LinearLayout
     private val aps = mutableListOf<ScanResult>()
+    private lateinit var usbAdapters: UsbAdapterManager
     private val bg = 0xFF0B0F17.toInt()
     private val panel = 0xFF141A24.toInt()
     private val textColor = 0xFFF5F7FA.toInt()
@@ -31,6 +32,7 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         wifi = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
         usb = applicationContext.getSystemService(USB_SERVICE) as UsbManager
+        usbAdapters = UsbAdapterManager(this)
         buildUi()
         requestNeededPermissions()
     }
@@ -67,7 +69,7 @@ class MainActivity : Activity() {
         root.addView(status, LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 12) })
         val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         actions.addView(actionButton("SCAN") { startWifiScan() }, LinearLayout.LayoutParams(0, 52, 1f).apply { setMargins(0, 0, 8, 0) })
-        actions.addView(actionButton("EXPORT") { exportReport() }, LinearLayout.LayoutParams(0, 52, 1f).apply { setMargins(8, 0, 0, 0) })
+        actions.addView(actionButton("CSV") { exportReport("text/csv", "csv") }, LinearLayout.LayoutParams(0, 52, 1f).apply { setMargins(8, 0, 0, 0) })
         root.addView(actions)
         val scroll = ScrollView(this)
         list = LinearLayout(this).apply {
@@ -170,15 +172,15 @@ class MainActivity : Activity() {
         updateCapabilities()
     }
 
-    private fun exportReport() {
+    private fun exportReport(type: String, extension: String) {
         if (aps.isEmpty()) {
             Toast.makeText(this, "Run a Wi‑Fi scan first.", Toast.LENGTH_SHORT).show()
             return
         }
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
         startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-            type = "text/csv"
-            putExtra(Intent.EXTRA_TITLE, "needle2-audit-$stamp.csv")
+            type = type
+            putExtra(Intent.EXTRA_TITLE, "needle2-audit-$stamp.$extension")
         }, 200)
     }
 
