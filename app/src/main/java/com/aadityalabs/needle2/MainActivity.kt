@@ -117,7 +117,7 @@ class MainActivity : Activity() {
             append("Location services    ${if (locationEnabled) "ON" else "OFF"}\n")
             append("USB host             ${if (usbHost) "AVAILABLE" else "NOT AVAILABLE"}\n")
             append("USB devices          ${usb.deviceList.size}\n")
-            val adapters = usbAdapters.listAdapters()
+            val adapters = usbAdapters.inventory()
             if (adapters.isNotEmpty()) {
                 append("\nUSB WI-FI ADAPTERS\n")
                 adapters.take(3).forEach { adapter ->
