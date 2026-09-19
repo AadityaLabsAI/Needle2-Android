@@ -90,14 +90,21 @@ jobs:
             app/build/outputs/apk/debug/app-debug.apk
             app/build/outputs/apk/release/needle2-release.apk
 
-      - name: Publish GitHub Release on manual run
-        if: github.event_name == 'workflow_dispatch'
+      - name: Publish latest APK to GitHub Release
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          version="v0.2.${{ github.run_number }}"
-          gh release create "$version" \
-            app/build/outputs/apk/release/needle2-release.apk \
-            app/build/outputs/apk/debug/app-debug.apk \
-            --title "Needle2 $version" \
-            --notes "Needle2 Android release build."
+          tag="needle2-latest"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" \
+              app/build/outputs/apk/release/needle2-release.apk \
+              app/build/outputs/apk/debug/app-debug.apk \
+              --clobber
+          else
+            gh release create "$tag" \
+              app/build/outputs/apk/release/needle2-release.apk \
+              app/build/outputs/apk/debug/app-debug.apk \
+              --title "Needle2 Latest Android APK" \
+              --notes "Latest automated Needle2 Android build from main."
+          fi
