@@ -5,8 +5,8 @@ import android.content.Intent
 import androidx.core.content.ContextCompat
 
 object MonitorController {
-    private const val ACTION_START = "com.aadityalabs.needle2.START"
-    private const val ACTION_STOP = "com.aadityalabs.needle2.STOP"
+    const val ACTION_START = "com.aadityalabs.needle2.START"
+    const val ACTION_STOP = "com.aadityalabs.needle2.STOP"
 
     fun start(context: Context) {
         ContextCompat.startForegroundService(
