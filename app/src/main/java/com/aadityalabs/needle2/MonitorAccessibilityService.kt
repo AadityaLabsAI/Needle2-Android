@@ -10,7 +10,8 @@ import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
 class MonitorAccessibilityService : AccessibilityService() {
-    companion object {\n        private const val LIFE_POINTS_PACKAGE = "com.kantarprofiles.lifepoints"
+    companion object {
+        private const val LIFE_POINTS_PACKAGE = "com.kantarprofiles.lifepoints"
         private var instance: MonitorAccessibilityService? = null
         private val scanRequested = AtomicBoolean(false)
         private var enabled = false
@@ -27,7 +28,10 @@ class MonitorAccessibilityService : AccessibilityService() {
     }
 
     private val handler = Handler(Looper.getMainLooper())
-    private var googleClickInProgress = false\n\n    fun isLifePointsForeground(): Boolean =\n        rootInActiveWindow?.packageName?.toString()?.lowercase(Locale.US) == LIFE_POINTS_PACKAGE
+    private var googleClickInProgress = false
+
+    fun isLifePointsForeground(): Boolean =
+        rootInActiveWindow?.packageName?.toString()?.lowercase(Locale.US) == LIFE_POINTS_PACKAGE
 
     override fun onServiceConnected() {
         super.onServiceConnected()
