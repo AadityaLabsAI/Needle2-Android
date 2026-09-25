@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Needle 2</string>
-    <string name="accessibility_description">Monitors the Life Points screen for configured values and alerts you. It does not click or submit anything.</string>
+    <string name="accessibility_description">Needle 2 monitors the Life Points screen, may tap the visible Google sign-in/continue navigation control, and alerts on configured values. It does not answer or submit surveys or collect rewards.</string>
 </resources>
