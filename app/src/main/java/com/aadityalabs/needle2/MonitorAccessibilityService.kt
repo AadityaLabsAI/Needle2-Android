@@ -31,14 +31,15 @@ class MonitorAccessibilityService : AccessibilityService() {
             scanRequested.set(false)
             instance?.handler?.removeCallbacksAndMessages(null)
         }
+
+        fun isLifePointsForeground(): Boolean =
+            instance?.rootInActiveWindow?.packageName?.toString()?.lowercase(Locale.US) ==
+                LIFE_POINTS_PACKAGE
     }
 
     private val handler = Handler(Looper.getMainLooper())
     private var googleClickInProgress = false
     private var lastTargetAlertAt = 0L
-
-    fun isLifePointsForeground(): Boolean =
-        rootInActiveWindow?.packageName?.toString()?.lowercase(Locale.US) == LIFE_POINTS_PACKAGE
 
     override fun onServiceConnected() {
         super.onServiceConnected()
