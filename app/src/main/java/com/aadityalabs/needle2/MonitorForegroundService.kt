@@ -15,7 +15,7 @@ import androidx.core.app.NotificationCompat
 import kotlin.random.Random
 
 class MonitorForegroundService : Service() {
-    companion object {
+    companion object {\n        private var instance: MonitorForegroundService? = null
         const val CHANNEL_ID = "needle_monitor"
         const val NOTIFICATION_ID = 2001
         const val ALERT_ID = 3000
@@ -24,7 +24,7 @@ class MonitorForegroundService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var running = false
 
-    override fun onCreate() {
+    fun scheduleNextCycle() { instance?.scheduleNextWindow() }\n\n    override fun onCreate() {\n        instance = this
         super.onCreate()
         createChannel()
         startForeground(NOTIFICATION_ID, buildStatus("Monitor ready"))
@@ -129,5 +129,5 @@ class MonitorForegroundService : Service() {
         }
     }
 
-    override fun onBind(intent: Intent?): IBinder? = null
+    override fun onDestroy() {\n        instance = null\n        handler.removeCallbacksAndMessages(null)\n        super.onDestroy()\n    }\n\n    override fun onBind(intent: Intent?): IBinder? = null
 }
