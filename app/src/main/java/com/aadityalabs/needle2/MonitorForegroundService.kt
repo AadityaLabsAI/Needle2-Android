@@ -4,6 +4,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
 import android.media.RingtoneManager
@@ -15,11 +16,26 @@ import androidx.core.app.NotificationCompat
 import kotlin.random.Random
 
 class MonitorForegroundService : Service() {
+
     companion object {
         private var instance: MonitorForegroundService? = null
+
+        private const val ACTION_ALERT = "com.aadityalabs.needle2.ALERT"
+        private const val EXTRA_MESSAGE = "message"
+        private const val LIFE_POINTS_PACKAGE = "com.kantarprofiles.lifepoints"
+
         const val CHANNEL_ID = "needle_monitor"
         const val NOTIFICATION_ID = 2001
         const val ALERT_ID = 3000
+
+        fun alertNow(context: Context, message: String) {
+            instance?.alert(message) ?: run {
+                val intent = Intent(context, MonitorForegroundService::class.java)
+                    .setAction(ACTION_ALERT)
+                    .putExtra(EXTRA_MESSAGE, message)
+                androidx.core.content.ContextCompat.startForegroundService(context, intent)
+            }
+        }
 
         fun scheduleNextCycle() {
             instance?.scheduleNextWindow()
@@ -28,28 +44,20 @@ class MonitorForegroundService : Service() {
 
     private val handler = Handler(Looper.getMainLooper())
     private var running = false
+    private var nextWindowScheduled = false
 
     override fun onCreate() {
-        instance = this
         super.onCreate()
+        instance = this
         createChannel()
         startForeground(NOTIFICATION_ID, buildStatus("Monitor ready"))
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when {
-            MonitorController.isStopAction(intent?.action) -> {
-                running = false
-                handler.removeCallbacksAndMessages(null)
-                MonitorAccessibilityService.requestStop()
-                stopSelf()
-            }
-            MonitorController.isStartAction(intent?.action) || intent?.action == null -> {
-                startMonitoring()
-            }
-            intent?.action == "com.aadityalabs.needle2.ALERT" -> {
-                alert(intent.getStringExtra("message") ?: "Life Points alert")
-            }
+        when (intent?.action) {
+            MonitorController.ACTION_STOP -> stopMonitoring()
+            MonitorController.ACTION_START, null -> startMonitoring()
+            ACTION_ALERT -> alert(intent.getStringExtra(EXTRA_MESSAGE) ?: "Life Points alert")
         }
         return START_STICKY
     }
@@ -61,29 +69,47 @@ class MonitorForegroundService : Service() {
         scheduleNextWindow()
     }
 
+    private fun stopMonitoring() {
+        running = false
+        nextWindowScheduled = false
+        handler.removeCallbacksAndMessages(null)
+        MonitorAccessibilityService.requestStop()
+        stopSelf()
+    }
+
     private fun scheduleNextWindow() {
-        if (!running) return
-        val delayMs = Random.nextLong(8 * 60 * 1000L, 10 * 60 * 1000L + 1)
-        val minutes = delayMs / 60000
-        val seconds = (delayMs / 1000) % 60
+        if (!running || nextWindowScheduled) return
+
+        nextWindowScheduled = true
+        val delayMs = Random.nextLong(8 * 60 * 1000L, 10 * 60 * 1000L + 1L)
+        val minutes = delayMs / 60000L
+        val seconds = (delayMs / 1000L) % 60L
         updateStatus(String.format("Next check in %dm %02ds", minutes, seconds))
 
         handler.postDelayed({
-            if (running) {
-                launchLifePointsIfNeeded()
-                handler.postDelayed({
-                    if (running) MonitorAccessibilityService.requestScan()
-                }, 1500L)
-                scheduleNextWindow()
-            }
+            nextWindowScheduled = false
+            if (!running) return@postDelayed
+
+            launchLifePointsIfNeeded()
+            handler.postDelayed({
+                if (running) MonitorAccessibilityService.requestScan()
+            }, 2500L)
+
+            scheduleNextWindow()
         }, delayMs)
     }
 
     private fun launchLifePointsIfNeeded() {
         if (MonitorAccessibilityService.isLifePointsForeground()) return
-        val intent = packageManager.getLaunchIntentForPackage("com.kantarprofiles.lifepoints") ?: return
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        startActivity(intent)
+
+        val launchIntent = packageManager.getLaunchIntentForPackage(LIFE_POINTS_PACKAGE)
+        if (launchIntent == null) {
+            alert("Life Points app was not found on this phone.")
+            return
+        }
+
+        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        startActivity(launchIntent)
     }
 
     fun alert(message: String) {
@@ -97,16 +123,18 @@ class MonitorForegroundService : Service() {
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
                 .setAutoCancel(true)
+                .setDefaults(NotificationCompat.DEFAULT_ALL)
                 .build()
         )
 
-        val ringtone = RingtoneManager.getRingtone(
+        RingtoneManager.getRingtone(
             this,
             RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-        )
-        ringtone?.let {
-            it.play()
-            handler.postDelayed({ if (it.isPlaying) it.stop() }, 12000L)
+        )?.let { ringtone ->
+            ringtone.play()
+            handler.postDelayed({
+                if (ringtone.isPlaying) ringtone.stop()
+            }, 12_000L)
         }
     }
 
@@ -131,10 +159,9 @@ class MonitorForegroundService : Service() {
                 "Needle 2 monitoring",
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Monitoring status and urgent Life Points alerts"
-                val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                description = "Needle 2 monitoring status and urgent alerts"
                 setSound(
-                    alarmUri,
+                    RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM),
                     AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_ALARM)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
@@ -149,7 +176,10 @@ class MonitorForegroundService : Service() {
 
     override fun onDestroy() {
         instance = null
+        running = false
+        nextWindowScheduled = false
         handler.removeCallbacksAndMessages(null)
+        MonitorAccessibilityService.requestStop()
         super.onDestroy()
     }
 
