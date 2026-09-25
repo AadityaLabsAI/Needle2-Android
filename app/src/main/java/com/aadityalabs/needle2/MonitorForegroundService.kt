@@ -69,7 +69,7 @@ class MonitorForegroundService : Service() {
         }, delayMs)
     }
 
-    fun alert(message: String) {
+    private fun launchLifePointsIfNeeded() {\n        if (MonitorAccessibilityService.isLifePointsForeground()) return\n        val intent = packageManager.getLaunchIntentForPackage("com.kantarprofiles.lifepoints") ?: return\n        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)\n        startActivity(intent)\n    }\n\n    fun alert(message: String) {
         val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         manager.notify(
             ALERT_ID,
