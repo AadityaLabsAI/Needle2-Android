@@ -2,6 +2,8 @@ package com.aadityalabs.needle2
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.os.Handler
+import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import java.util.Locale
@@ -23,6 +25,9 @@ class MonitorAccessibilityService : AccessibilityService() {
             scanRequested.set(false)
         }
     }
+
+    private val handler = Handler(Looper.getMainLooper())
+    private var googleClickInProgress = false
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -48,20 +53,65 @@ class MonitorAccessibilityService : AccessibilityService() {
         val packageName = root.packageName?.toString()?.lowercase(Locale.US) ?: return
         if (!isLifePointsPackage(packageName)) return
 
+        if (findAndClickGoogle(root)) return
+
         val texts = ArrayList<String>()
         collectText(root, texts)
         val joined = texts.joinToString(" ").lowercase(Locale.US)
 
         when {
             containsSorry(joined) -> {
-                alert("Life Points: Sorry detected.")
-                enabled = false
+                alert("Life Points: Sorry detected. Returning to Home.")
+                performGlobalAction(GLOBAL_ACTION_HOME)
+                scheduleNextCycle()
             }
             containsTarget(joined) -> {
                 alert("Life Points: target value detected: " + findTarget(joined))
+                // Avoid repeatedly alarming while the same value remains visible.
+                handler.postDelayed({ if (enabled) requestScan() }, 30_000L)
             }
-            containsLifePoints(joined) -> {
-                // Loading/logo state: no action; next scheduled scan checks again.
+            else -> {
+                // Loading/logo/dashboard-without-target: wait for the next scheduled check.
+            }
+        }
+    }
+
+    private fun findAndClickGoogle(root: AccessibilityNodeInfo): Boolean {
+        if (googleClickInProgress) return true
+        val nodes = ArrayList<AccessibilityNodeInfo>()
+        collectClickableCandidates(root, nodes)
+        val node = nodes.firstOrNull { n ->
+            val text = ((n.text?.toString() ?: "") + " " +
+                    (n.contentDescription?.toString() ?: "")).lowercase(Locale.US)
+            (text.contains("google") || text.contains("sign in with google")) &&
+                    (n.isClickable || n.isFocusable)
+        }
+        nodes.filter { it !== node }.forEach { it.recycle() }
+
+        if (node == null) return false
+
+        googleClickInProgress = true
+        val clicked = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        node.recycle()
+
+        if (clicked) {
+            handler.postDelayed({
+                googleClickInProgress = false
+                if (enabled) requestScan()
+            }, 15_000L)
+            return true
+        }
+
+        googleClickInProgress = false
+        return false
+    }
+
+    private fun collectClickableCandidates(node: AccessibilityNodeInfo, out: MutableList<AccessibilityNodeInfo>) {
+        if (node.isClickable || node.isFocusable) out.add(node)
+        for (i in 0 until node.childCount) {
+            node.getChild(i)?.let { child ->
+                collectClickableCandidates(child, out)
+                if (child !== node) child.recycle()
             }
         }
     }
@@ -70,9 +120,9 @@ class MonitorAccessibilityService : AccessibilityService() {
         node.text?.toString()?.takeIf { it.isNotBlank() }?.let(out::add)
         node.contentDescription?.toString()?.takeIf { it.isNotBlank() }?.let(out::add)
         for (i in 0 until node.childCount) {
-            node.getChild(i)?.let {
-                collectText(it, out)
-                it.recycle()
+            node.getChild(i)?.let { child ->
+                collectText(child, out)
+                child.recycle()
             }
         }
     }
@@ -86,9 +136,6 @@ class MonitorAccessibilityService : AccessibilityService() {
     private fun containsSorry(text: String): Boolean =
         Regex("""\bsorry\b""").containsMatchIn(text)
 
-    private fun containsLifePoints(text: String): Boolean =
-        text.contains("life points") || text.contains("lifepoints")
-
     private fun isLifePointsPackage(packageName: String): Boolean =
         packageName.contains("lifepoints") ||
         packageName.contains("life.points") ||
@@ -98,6 +145,11 @@ class MonitorAccessibilityService : AccessibilityService() {
         MonitorForegroundServiceBridge.alert(this, message)
     }
 
+    private fun scheduleNextCycle() {
+        // The foreground service owns the randomized 8–10 minute loop.
+        MonitorForegroundService.scheduleNextCycle()
+    }
+
     override fun onInterrupt() {
         scanRequested.set(false)
     }
@@ -105,6 +157,7 @@ class MonitorAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         instance = null
         scanRequested.set(false)
+        handler.removeCallbacksAndMessages(null)
         super.onDestroy()
     }
 }
