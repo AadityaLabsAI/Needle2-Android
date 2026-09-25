@@ -10,25 +10,32 @@ import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
 class MonitorAccessibilityService : AccessibilityService() {
+
     companion object {
         private const val LIFE_POINTS_PACKAGE = "com.kantarprofiles.lifepoints"
         private var instance: MonitorAccessibilityService? = null
         private val scanRequested = AtomicBoolean(false)
         private var enabled = false
 
-        fun requestStart() { enabled = true }
+        fun requestStart() {
+            enabled = true
+        }
+
         fun requestScan() {
             scanRequested.set(true)
             instance?.scanActiveWindow()
         }
+
         fun requestStop() {
             enabled = false
             scanRequested.set(false)
+            instance?.handler?.removeCallbacksAndMessages(null)
         }
     }
 
     private val handler = Handler(Looper.getMainLooper())
     private var googleClickInProgress = false
+    private var lastTargetAlertAt = 0L
 
     fun isLifePointsForeground(): Boolean =
         rootInActiveWindow?.packageName?.toString()?.lowercase(Locale.US) == LIFE_POINTS_PACKAGE
@@ -53,57 +60,113 @@ class MonitorAccessibilityService : AccessibilityService() {
 
     private fun scanActiveWindow() {
         if (!enabled || !scanRequested.compareAndSet(true, false)) return
+
         val root = rootInActiveWindow ?: return
         val packageName = root.packageName?.toString()?.lowercase(Locale.US) ?: return
-        if (!isLifePointsPackage(packageName)) return
-
-        if (findAndClickGoogle(root)) return
+        if (packageName != LIFE_POINTS_PACKAGE) return
 
         val texts = ArrayList<String>()
         collectText(root, texts)
         val joined = texts.joinToString(" ").lowercase(Locale.US)
 
+        // Only perform the narrow navigation action needed to continue into the
+        // already-authenticated Life Points dashboard. Never answer or submit surveys.
+        if (findAndClickGoogle(root, joined)) return
+
         when {
             containsSorry(joined) -> {
-                alert("Life Points: Sorry detected. Returning to Home.")
+                alert("Life Points: Sorry detected.")
+                // Leave the app without attempting to answer anything.
                 performGlobalAction(GLOBAL_ACTION_HOME)
-                scheduleNextCycle()
             }
+
             containsTarget(joined) -> {
-                alert("Life Points: target value detected: " + findTarget(joined))
-                // Avoid repeatedly alarming while the same value remains visible.
-                handler.postDelayed({ if (enabled) requestScan() }, 30_000L)
-            }
-            else -> {
-                // Loading/logo/dashboard-without-target: wait for the next scheduled check.
+                val now = System.currentTimeMillis()
+                if (now - lastTargetAlertAt >= 60_000L) {
+                    lastTargetAlertAt = now
+                    alert("Life Points: target value detected: " + findTarget(joined))
+                }
             }
         }
     }
 
-    private fun findAndClickGoogle(root: AccessibilityNodeInfo): Boolean {
+    private fun findAndClickGoogle(
+        root: AccessibilityNodeInfo,
+        screenText: String
+    ): Boolean {
         if (googleClickInProgress) return true
 
-        val matches = root.findAccessibilityNodeInfosByText("Google")
-        val node = matches.firstOrNull { it.isVisibleToUser && (it.isClickable || it.isFocusable) }
-            ?: matches.firstOrNull { it.isVisibleToUser }
+        val googleNodes = ArrayList<AccessibilityNodeInfo>()
+        collectGoogleNodes(root, googleNodes)
 
-        matches.filter { it !== node }.forEach { it.recycle() }
-        if (node == null) return false
+        val loginContext = screenText.contains("sign in") ||
+            screenText.contains("continue") ||
+            screenText.contains("log in") ||
+            screenText.contains("login")
 
-        googleClickInProgress = true
-        val clicked = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-        node.recycle()
-
-        if (clicked) {
-            handler.postDelayed({
-                googleClickInProgress = false
-                if (enabled) requestScan()
-            }, 15_000L)
-            return true
+        val candidate = googleNodes.firstOrNull { node ->
+            node.isVisibleToUser &&
+                (isGoogleLabel(node) && (loginContext || node.isClickable))
         }
 
-        googleClickInProgress = false
-        return false
+        googleNodes.filter { it !== candidate }.forEach { it.recycle() }
+        if (candidate == null) return false
+
+        val clickable = findClickableAncestor(candidate)
+        val clicked = clickable?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
+
+        if (clickable != null && clickable !== candidate) clickable.recycle()
+        candidate.recycle()
+
+        if (!clicked) return false
+
+        googleClickInProgress = true
+        // Life Points needs time to redirect to the already-authenticated dashboard.
+        handler.postDelayed({
+            googleClickInProgress = false
+            if (enabled) requestScan()
+        }, 15_000L)
+        return true
+    }
+
+    private fun collectGoogleNodes(
+        node: AccessibilityNodeInfo,
+        out: MutableList<AccessibilityNodeInfo>
+    ) {
+        if (isGoogleLabel(node)) out.add(node)
+        else {
+            for (i in 0 until node.childCount) {
+                node.getChild(i)?.let { child ->
+                    collectGoogleNodes(child, out)
+                    if (child !in out) child.recycle()
+                }
+            }
+        }
+    }
+
+    private fun isGoogleLabel(node: AccessibilityNodeInfo): Boolean {
+        val text = node.text?.toString()?.trim()?.lowercase(Locale.US).orEmpty()
+        val desc = node.contentDescription?.toString()?.trim()?.lowercase(Locale.US).orEmpty()
+        return text == "google" ||
+            desc == "google" ||
+            text.contains("sign in with google") ||
+            desc.contains("sign in with google") ||
+            text.contains("continue with google") ||
+            desc.contains("continue with google")
+    }
+
+    private fun findClickableAncestor(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        if (node.isClickable) return node
+        var parent = node.parent
+        repeat(4) {
+            if (parent == null) return null
+            if (parent.isClickable) return parent
+            val next = parent.parent
+            parent.recycle()
+            parent = next
+        }
+        parent?.recycle()
+        return null
     }
 
     private fun collectText(node: AccessibilityNodeInfo, out: MutableList<String>) {
@@ -126,18 +189,8 @@ class MonitorAccessibilityService : AccessibilityService() {
     private fun containsSorry(text: String): Boolean =
         Regex("""\bsorry\b""").containsMatchIn(text)
 
-    private fun isLifePointsPackage(packageName: String): Boolean =
-        packageName.contains("lifepoints") ||
-        packageName.contains("life.points") ||
-        packageName.contains("lifepoint")
-
     private fun alert(message: String) {
-        MonitorForegroundServiceBridge.alert(this, message)
-    }
-
-    private fun scheduleNextCycle() {
-        // The foreground service owns the randomized 8–10 minute loop.
-        MonitorForegroundService.scheduleNextCycle()
+        MonitorForegroundService.alertNow(this, message)
     }
 
     override fun onInterrupt() {
