@@ -78,16 +78,12 @@ class MonitorAccessibilityService : AccessibilityService() {
 
     private fun findAndClickGoogle(root: AccessibilityNodeInfo): Boolean {
         if (googleClickInProgress) return true
-        val nodes = ArrayList<AccessibilityNodeInfo>()
-        collectClickableCandidates(root, nodes)
-        val node = nodes.firstOrNull { n ->
-            val text = ((n.text?.toString() ?: "") + " " +
-                    (n.contentDescription?.toString() ?: "")).lowercase(Locale.US)
-            (text.contains("google") || text.contains("sign in with google")) &&
-                    (n.isClickable || n.isFocusable)
-        }
-        nodes.filter { it !== node }.forEach { it.recycle() }
 
+        val matches = root.findAccessibilityNodeInfosByText("Google")
+        val node = matches.firstOrNull { it.isVisibleToUser && (it.isClickable || it.isFocusable) }
+            ?: matches.firstOrNull { it.isVisibleToUser }
+
+        matches.filter { it !== node }.forEach { it.recycle() }
         if (node == null) return false
 
         googleClickInProgress = true
@@ -104,16 +100,6 @@ class MonitorAccessibilityService : AccessibilityService() {
 
         googleClickInProgress = false
         return false
-    }
-
-    private fun collectClickableCandidates(node: AccessibilityNodeInfo, out: MutableList<AccessibilityNodeInfo>) {
-        if (node.isClickable || node.isFocusable) out.add(node)
-        for (i in 0 until node.childCount) {
-            node.getChild(i)?.let { child ->
-                collectClickableCandidates(child, out)
-                if (child !== node) child.recycle()
-            }
-        }
     }
 
     private fun collectText(node: AccessibilityNodeInfo, out: MutableList<String>) {
