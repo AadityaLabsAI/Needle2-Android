@@ -162,11 +162,8 @@ class MonitorAccessibilityService : AccessibilityService() {
         repeat(4) {
             if (parent == null) return null
             if (parent.isClickable) return parent
-            val next = parent.parent
-            parent.recycle()
-            parent = next
+            parent = parent.parent
         }
-        parent?.recycle()
         return null
     }
 
