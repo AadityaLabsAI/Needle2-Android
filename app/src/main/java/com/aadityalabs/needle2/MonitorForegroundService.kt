@@ -15,16 +15,22 @@ import androidx.core.app.NotificationCompat
 import kotlin.random.Random
 
 class MonitorForegroundService : Service() {
-    companion object {\n        private var instance: MonitorForegroundService? = null
+    companion object {
+        private var instance: MonitorForegroundService? = null
         const val CHANNEL_ID = "needle_monitor"
         const val NOTIFICATION_ID = 2001
         const val ALERT_ID = 3000
+
+        fun scheduleNextCycle() {
+            instance?.scheduleNextWindow()
+        }
     }
 
     private val handler = Handler(Looper.getMainLooper())
     private var running = false
 
-    fun scheduleNextCycle() { instance?.scheduleNextWindow() }\n\n    override fun onCreate() {\n        instance = this
+    override fun onCreate() {
+        instance = this
         super.onCreate()
         createChannel()
         startForeground(NOTIFICATION_ID, buildStatus("Monitor ready"))
@@ -60,16 +66,27 @@ class MonitorForegroundService : Service() {
         val delayMs = Random.nextLong(8 * 60 * 1000L, 10 * 60 * 1000L + 1)
         val minutes = delayMs / 60000
         val seconds = (delayMs / 1000) % 60
-        updateStatus(String.format("Next screen check in %dm %02ds", minutes, seconds))
+        updateStatus(String.format("Next check in %dm %02ds", minutes, seconds))
+
         handler.postDelayed({
             if (running) {
-                MonitorAccessibilityService.requestScan()
+                launchLifePointsIfNeeded()
+                handler.postDelayed({
+                    if (running) MonitorAccessibilityService.requestScan()
+                }, 1500L)
                 scheduleNextWindow()
             }
         }, delayMs)
     }
 
-    private fun launchLifePointsIfNeeded() {\n        if (MonitorAccessibilityService.isLifePointsForeground()) return\n        val intent = packageManager.getLaunchIntentForPackage("com.kantarprofiles.lifepoints") ?: return\n        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)\n        startActivity(intent)\n    }\n\n    fun alert(message: String) {
+    private fun launchLifePointsIfNeeded() {
+        if (MonitorAccessibilityService.isLifePointsForeground()) return
+        val intent = packageManager.getLaunchIntentForPackage("com.kantarprofiles.lifepoints") ?: return
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        startActivity(intent)
+    }
+
+    fun alert(message: String) {
         val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         manager.notify(
             ALERT_ID,
@@ -82,13 +99,14 @@ class MonitorForegroundService : Service() {
                 .setAutoCancel(true)
                 .build()
         )
+
         val ringtone = RingtoneManager.getRingtone(
             this,
             RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
         )
         ringtone?.let {
             it.play()
-            handler.postDelayed({ if (it.isPlaying) it.stop() }, 12000)
+            handler.postDelayed({ if (it.isPlaying) it.stop() }, 12000L)
         }
     }
 
@@ -129,5 +147,11 @@ class MonitorForegroundService : Service() {
         }
     }
 
-    override fun onDestroy() {\n        instance = null\n        handler.removeCallbacksAndMessages(null)\n        super.onDestroy()\n    }\n\n    override fun onBind(intent: Intent?): IBinder? = null
+    override fun onDestroy() {
+        instance = null
+        handler.removeCallbacksAndMessages(null)
+        super.onDestroy()
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
 }
